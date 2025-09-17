@@ -2,18 +2,29 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { supabase } from "@/lib/supabaseClient";
-
+interface Game {
+  id: string;
+  name: string;
+  opponent?: string;
+  date?: string;
+  [key: string]: any;
+}
 interface GameForm {
   date: string;
   label: string;
   teamRole: "ours" | "opponent";
   video?: FileList;
 }
-
+interface Video {
+  id: string;
+  name: string;
+  url?: string;
+  [key: string]: any;
+}
 export default function FilmPage() {
   const { register, handleSubmit, reset } = useForm<GameForm>();
-  const [games, setGames] = useState<any[]>([]);
-  const [videos, setVideos] = useState<any[]>([]);
+  const [games, setGames] = useState<Game[]>([]);
+  const [videos, setVideos] = useState<Video[]>([]);
 
   useEffect(() => {
     (async () => {

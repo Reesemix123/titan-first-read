@@ -5,6 +5,24 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { supabase } from "@/lib/supabaseClient";
 import PlaybookUpload from '@/components/PlaybookUpload';
+interface Team {
+  id: string;
+  name: string;
+  created_at?: string;
+  [key: string]: any;
+}
+interface Play {
+  id: string;
+  name: string;
+  formation?: string;
+  [key: string]: any;
+}
+interface Playbook {
+  id: string;
+  name: string;
+  file_path?: string;
+  [key: string]: any;
+}
 
 // Common team colors
 const TEAM_COLORS = [
@@ -27,11 +45,11 @@ const PlaySchema = z.object({
 
 export default function SetupPage() {
   const [tab, setTab] = useState<"playbook" | "plays">("playbook");
-  const [teams, setTeams] = useState<any[]>([]);
-  const [plays, setPlays] = useState<any[]>([]);
-  const [playbooks, setPlaybooks] = useState<any[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [plays, setPlays] = useState<Play[]>([]);
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [teamId, setTeamId] = useState<string | null>(null);
-  const [selectedTeam, setSelectedTeam] = useState<any | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [teamView, setTeamView] = useState<"list" | "manage">("list");
 
   const teamForm = useForm({ resolver: zodResolver(TeamSchema) });
@@ -88,7 +106,7 @@ useEffect(() => {
   }
 
   // Select a team to manage
-  function selectTeam(team: any) {
+  function selectTeam(team: Team) {
     setSelectedTeam(team);
     setTeamId(team.id);
     setTeamView("manage");
@@ -158,7 +176,7 @@ useEffect(() => {
   }
 
   // Create Team
-  async function onCreateTeam(values: any) {
+ async function onCreateTeam(values: { name: string }) {
     try {
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) return alert("Not signed in");
@@ -207,7 +225,7 @@ useEffect(() => {
   }
 
   // Add Play
-  async function onAddPlay(values: any) {
+  async function onAddPlay(values: { name: string; formation?: string }) {
     if (!teamId) return alert("No team selected");
 
     // auto-generate next code

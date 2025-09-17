@@ -1,6 +1,7 @@
 // PDF Text and Image Extraction Utility
 // src/lib/pdfExtraction.ts
 import * as pdfjsLib from 'pdfjs-dist';
+import { TextItem } from 'pdfjs-dist/types/src/display/api';
 
 // Configure PDF.js worker
 if (typeof window !== 'undefined') {
@@ -41,7 +42,7 @@ export const extractPDFPages = async (file: File): Promise<PDFPage[]> => {
       
       // Get text content
       const textContent = await page.getTextContent();
-      const textItems = textContent.items.map((item: any) => item.str).join(' ');
+      const textItems = textContent.items.map((item: TextItem) => item.str).join(' ');
       
       // Render page to canvas for image
       const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better quality
@@ -171,7 +172,7 @@ const analyzeTextForPlayName = (text: string): Omit<ExtractedPlay, 'pageNumber' 
   else return null;
   
   // Clean up the play name
-  let playName = trimmedText
+  const playName = trimmedText
     .replace(/^\d+[\.\-\s]+/, '')
     .replace(/[^\w\s\-]/g, ' ')
     .replace(/\s+/g, ' ')
