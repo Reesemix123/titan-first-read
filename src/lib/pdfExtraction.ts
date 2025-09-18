@@ -1,187 +1,139 @@
-// PDF Text and Image Extraction Utility
 // src/lib/pdfExtraction.ts
 import * as pdfjsLib from 'pdfjs-dist';
 import { TextItem } from 'pdfjs-dist/types/src/display/api';
 
 // Configure PDF.js worker
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
 }
 
-export interface ExtractedPlay {
-  name: string;
-  pageNumber: number;
-  confidence: 'high' | 'medium' | 'low';
-  imageDataUrl?: string; // Base64 encoded image
-  textContent: string;
-  boundingBox?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
+interface ExtractedContent {
+  text: string;
+  images: string[];
+}
+
+interface PDFDocumentProxy {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<PDFPageProxy>;
+}
+
+interface PDFPageProxy {
+  getTextContent: () => Promise<{ items: TextItem[] }>;
+  getOperatorList: () => Promise<{ fnArray: number[]; argsArray: unknown[][] }>;
+  objs: {
+    get: (name: string) => Promise<unknown>;
   };
 }
 
-export interface PDFPage {
-  pageNumber: number;
-  textContent: string;
-  imageDataUrl: string;
-  width: number;
-  height: number;
-}
-
-// Extract all pages with text and images
-export const extractPDFPages = async (file: File): Promise<PDFPage[]> => {
+export async function extractPDFContent(file: File): Promise<ExtractedContent> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-    const pages: PDFPage[] = [];
+    // Dynamic import for client-side only
+    const pdfJS = await import('pdfjs-dist/webpack.mjs');
+    
+    // Set up the worker - Next.js 15 compatible path
+    pdfJS.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
 
+    // Convert file to array buffer
+    const arrayBuffer = await file.arrayBuffer();
+    
+    // Load the PDF document
+    const pdf = await pdfJS.getDocument(arrayBuffer).promise;
+    
+    const extractedContent: ExtractedContent = {
+      text: '',
+      images: []
+    };
+
+    // Process each page
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       
-      // Get text content
+      // Extract text content
       const textContent = await page.getTextContent();
-      const textItems = textContent.items.map((item: TextItem) => item.str).join(' ');
+      const pageText = textContent.items
+        .map((item: TextItem) => item.str)
+        .join(' ');
       
-      // Render page to canvas for image
-      const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better quality
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d')!;
-      
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      
-      const renderContext = {
-        canvasContext: context,
-        viewport: viewport,
-      };
-      
-      await page.render(renderContext).promise;
-      const imageDataUrl = canvas.toDataURL('image/png');
-      
-      pages.push({
-        pageNumber: pageNum,
-        textContent: textItems,
-        imageDataUrl,
-        width: viewport.width,
-        height: viewport.height
-      });
-    }
-    
-    return pages;
-  } catch (error) {
-    console.error('Error extracting PDF pages:', error);
-    throw new Error('Failed to extract PDF pages');
-  }
-};
+      extractedContent.text += pageText + '\n';
 
-// Enhanced play extraction with image association
-export const extractPlaysFromPages = (pages: PDFPage[]): ExtractedPlay[] => {
-  const extractedPlays: ExtractedPlay[] = [];
-  const seenPlays = new Set<string>();
-
-  pages.forEach((page) => {
-    const lines = page.textContent.split(/\s+/);
-    const playCandidate = analyzePageForPlayName(page, lines);
-    
-    if (playCandidate && !seenPlays.has(playCandidate.name.toLowerCase())) {
-      seenPlays.add(playCandidate.name.toLowerCase());
-      extractedPlays.push({
-        ...playCandidate,
-        pageNumber: page.pageNumber,
-        imageDataUrl: page.imageDataUrl,
-        textContent: page.textContent
-      });
-    }
-  });
-
-  return extractedPlays;
-};
-
-// Analyze a single page for play names
-const analyzePageForPlayName = (page: PDFPage, words: string[]): Omit<ExtractedPlay, 'pageNumber' | 'imageDataUrl' | 'textContent'> | null => {
-  const text = words.join(' ');
-  
-  // Skip pages with too little content
-  if (words.length < 5) return null;
-  
-  // Look for play name patterns in the first few lines/words
-  const firstWords = words.slice(0, 10).join(' ');
-  const playCandidate = analyzeTextForPlayName(firstWords);
-  
-  if (!playCandidate) {
-    // Try to find play names in the full text
-    const sentences = text.split(/[.!?]+/);
-    for (const sentence of sentences.slice(0, 3)) { // Check first 3 sentences
-      const candidate = analyzeTextForPlayName(sentence.trim());
-      if (candidate) {
-        return candidate;
+      // Extract images (optional - can be resource intensive)
+      try {
+        const operators = await page.getOperatorList();
+        for (let i = 0; i < operators.fnArray.length; i++) {
+          if (operators.fnArray[i] === pdfJS.OPS.paintImageXObject) {
+            const imageName = operators.argsArray[i][0];
+            try {
+              const image = await page.objs.get(imageName);
+              if (image) {
+                // Convert image to base64 if needed
+                // This is a simplified version - you might want to add more processing
+                extractedContent.images.push(`image_${pageNum}_${i}`);
+              }
+            } catch (imageError) {
+              console.warn(`Could not extract image ${imageName}:`, imageError);
+            }
+          }
+        }
+      } catch (imageError) {
+        console.warn(`Could not extract images from page ${pageNum}:`, imageError);
       }
     }
-    return null;
-  }
-  
-  return playCandidate;
-};
 
-// Analyze text for play name characteristics
-const analyzeTextForPlayName = (text: string): Omit<ExtractedPlay, 'pageNumber' | 'imageDataUrl' | 'textContent'> | null => {
-  const trimmedText = text.trim();
+    return extractedContent;
+  } catch (error) {
+    console.error('Error extracting PDF content:', error);
+    throw new Error(`Failed to extract PDF content: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+// Alternative simpler version for just text extraction
+export async function extractPDFText(file: File): Promise<string> {
+  try {
+    const pdfJS = await import('pdfjs-dist/webpack.mjs');
+    pdfJS.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfJS.getDocument(arrayBuffer).promise;
+    
+    let fullText = '';
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      
+      const pageText = textContent.items
+        .map((item: TextItem) => item.str)
+        .join(' ');
+      
+      fullText += pageText + '\n';
+    }
+
+    return fullText.trim();
+  } catch (error) {
+    console.error('Error extracting PDF text:', error);
+    throw new Error(`Failed to extract PDF text: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+// Play extraction function with proper typing
+export function extractPlaysFromText(text: string): Array<{ name: string; formation?: string; description?: string }> {
+  const plays: Array<{ name: string; formation?: string; description?: string }> = [];
+  const lines = text.split('\n');
   
-  // Skip common non-play patterns
-  const skipPatterns = [
-    /^(page|chapter|section|table of contents|index|copyright|©)/i,
-    /^\d+$/,
-    /^[a-z\s]*$/,
-    /^(the|and|of|in|on|at|to|for|with|by)[\s\w]*$/i,
-    /^\w{1,2}$/,
-    /^[.,:;!?-]+$/
-  ];
-  
-  if (skipPatterns.some(pattern => pattern.test(trimmedText))) {
-    return null;
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (trimmedLine.length > 0) {
+      // Simple play detection - you may want to improve this logic
+      if (trimmedLine.match(/^[A-Z][a-zA-Z\s]+$/)) {
+        const playName = trimmedLine;
+        plays.push({
+          name: playName,
+          formation: 'Unknown',
+          description: 'Extracted from PDF'
+        });
+      }
+    }
   }
   
-  let confidence: 'high' | 'medium' | 'low' = 'low';
-  let score = 0;
-  
-  // Scoring system for play name detection
-  const isAllCaps = trimmedText === trimmedText.toUpperCase() && trimmedText.length > 3;
-  const isTitleCase = /^[A-Z][a-z]/.test(trimmedText) && /\s[A-Z]/.test(trimmedText);
-  const hasFootballTerms = /\b(play|formation|route|pass|run|blitz|coverage|zone|man|option|screen|draw|slant|post|corner|fade|comeback|hitch|out|in|go|curl|dig|cross|wheel|bubble|power|iso|counter|sweep|trap|dive|bootleg|rollout|pocket|shotgun|pistol|wildcat|trips|bunch|stack|spread|i-form|singleback|fullback|wingback|tight end|wide receiver|running back|quarterback|linebacker|safety|cornerback|defensive end|defensive tackle|nose guard)\b/i.test(trimmedText);
-  
-  if (isAllCaps) score += 3;
-  if (isTitleCase) score += 2;
-  if (hasFootballTerms) score += 4;
-  
-  // Word count scoring
-  const wordCount = trimmedText.split(/\s+/).length;
-  if (wordCount >= 2 && wordCount <= 6) score += 2;
-  if (wordCount === 1 && trimmedText.length > 3) score += 1;
-  
-  // Check for numbered plays
-  if (/^\d+[\.\-\s]/.test(trimmedText)) score += 2;
-  
-  // Formation indicators
-  if (/\b(formation|set|personnel|alignment)\b/i.test(trimmedText)) score += 2;
-  
-  // Determine confidence
-  if (score >= 6) confidence = 'high';
-  else if (score >= 3) confidence = 'medium';
-  else return null;
-  
-  // Clean up the play name
-  const playName = trimmedText
-    .replace(/^\d+[\.\-\s]+/, '')
-    .replace(/[^\w\s\-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  
-  if (playName.length < 3) return null;
-  
-  return {
-    name: playName,
-    confidence
-  };
-};
+  return plays;
+}
