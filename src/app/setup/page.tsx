@@ -1,63 +1,56 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { supabase } from '@/lib/supabaseClient';
+import { createClient } from '@/utils/supabase/client';
+import { User } from '@supabase/supabase-js';
+import PlaybookUpload from '@/components/PlaybookUpload';
+import PlaybookViewer from '@/components/PlaybookViewer';
 
 interface Team {
   id: string;
   name: string;
-  created_at?: string;
-  color?: string;
-}
-
-interface Play {
-  id: string;
-  name: string;
-  formation?: string;
-  team_id?: string;
-}
-
-interface Playbook {
-  id: string;
-  name: string;
-  file_path?: string;
-  team_id?: string;
-}
-
-interface TeamFormData {
-  name: string;
-  color: string;
-}
-
-interface PlayFormData {
-  name: string;
-  formation?: string;
+  level: string;
+  colors: any;
+  created_at: string;
 }
 
 export default function SetupPage() {
+  const [user, setUser] = useState<User | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [plays, setPlays] = useState<Play[]>([]);
-  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
-  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [isCreatingTeam, setIsCreatingTeam] = useState(false);
-  const [isAddingPlay, setIsAddingPlay] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState('');
-
-  const teamForm = useForm<TeamFormData>();
-  const playForm = useForm<PlayFormData>();
+  const [teamName, setTeamName] = useState('');
+  const [teamLevel, setTeamLevel] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'teams' | 'playbook'>('teams');
+  
+  const supabase = createClient();
 
   useEffect(() => {
-    fetchTeams();
-  }, []);
-
-  useEffect(() => {
-    if (selectedTeam) {
-      fetchPlays(selectedTeam.id);
-      fetchPlaybooks(selectedTeam.id);
+    async function checkUser() {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        if (error) {
+          console.error('Auth error:', error);
+          setMessage('Authentication error. Please sign in.');
+          return;
+        }
+        
+        setUser(user);
+        if (user) {
+          await fetchTeams();
+        }
+      } catch (error) {
+        console.error('Unexpected error:', error);
+        setMessage('Unexpected error occurred.');
+      } finally {
+        setLoading(false);
+      }
     }
-  }, [selectedTeam]);
+    
+    checkUser();
+  }, [supabase]);
 
   async function fetchTeams() {
     try {
@@ -66,472 +59,283 @@ export default function SetupPage() {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setTeams(data || []);
+      if (error) {
+        console.error('Error fetching teams:', error);
+      } else {
+        setTeams(data || []);
+        if (data && data.length > 0 && !selectedTeamId) {
+          setSelectedTeamId(data[0].id);
+        }
+      }
     } catch (error) {
       console.error('Error fetching teams:', error);
     }
   }
 
-  async function fetchPlays(teamId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('plays')
-        .select('*')
-        .eq('team_id', teamId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setPlays(data || []);
-    } catch (error) {
-      console.error('Error fetching plays:', error);
+  async function createTeam() {
+    if (!user) {
+      setMessage('Please sign in to create a team');
+      return;
     }
-  }
 
-  async function fetchPlaybooks(teamId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('playbooks')
-        .select('*')
-        .eq('team_id', teamId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setPlaybooks(data || []);
-    } catch (error) {
-      console.error('Error fetching playbooks:', error);
+    if (!teamName.trim()) {
+      setMessage('Please enter a team name');
+      return;
     }
-  }
 
-  function selectTeam(team: Team) {
-    setSelectedTeam(team);
-  }
-
-  async function onCreateTeam(values: TeamFormData) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        alert('Please sign in to create a team');
-        return;
-      }
-
       const { data, error } = await supabase
         .from('teams')
-        .insert([
-          {
-            name: values.name,
-            color: values.color,
-            user_id: user.id
-          }
-        ])
+        .insert([{ 
+          name: teamName.trim(), 
+          level: teamLevel.trim() || 'High School',
+          colors: { primary: 'Blue', secondary: 'White' },
+          user_id: user.id 
+        }])
         .select()
         .single();
 
-      if (error) throw error;
-
-      setTeams(prev => [data, ...prev]);
-      setSelectedTeam(data);
-      setIsCreatingTeam(false);
-      teamForm.reset();
-      console.log('Team created successfully');
-    } catch (error) {
-      console.error('Error creating team:', error);
-      alert('Failed to create team');
+      if (error) {
+        console.error('Database error:', error);
+        setMessage(`Error: ${error.message}`);
+      } else {
+        setMessage(`Success! Created team: ${data.name}`);
+        setTeamName('');
+        setTeamLevel('');
+        await fetchTeams(); // Refresh teams list
+        setSelectedTeamId(data.id); // Select the newly created team
+      }
+    } catch (err) {
+      console.error('Unexpected error:', err);
+      setMessage(`Unexpected error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }
 
-  async function onAddPlay(values: PlayFormData) {
-    if (!selectedTeam) {
-      alert('Please select a team first');
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('plays')
-        .insert([
-          {
-            name: values.name,
-            formation: values.formation || 'Unknown',
-            team_id: selectedTeam.id
-          }
-        ])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setPlays(prev => [data, ...prev]);
-      setIsAddingPlay(false);
-      playForm.reset();
-      console.log('Play added successfully');
-    } catch (error) {
-      console.error('Error adding play:', error);
-      alert('Failed to add play');
-    }
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
   }
 
-  async function handlePlaybookUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !selectedTeam) {
-      alert('Please select a team and file');
-      return;
-    }
-
-    if (file.type !== 'application/pdf') {
-      alert('Please select a PDF file');
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadStatus('Uploading file...');
-
-    try {
-      // Upload file to Supabase Storage
-      const fileName = `${selectedTeam.id}/${Date.now()}_${file.name}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('playbook_pdfs')
-        .upload(fileName, file);
-
-      if (uploadError) throw uploadError;
-
-      console.log('File uploaded successfully:', fileName);
-      setUploadStatus('Processing PDF...');
-
-      // Extract PDF content
-      const { extractPDFText } = await import('@/lib/pdfExtraction');
-      const extractedText = await extractPDFText(file);
-
-      if (!extractedText.trim()) {
-        throw new Error('No text content found in PDF');
-      }
-
-      console.log('PDF text extracted successfully');
-      setUploadStatus('Saving playbook...');
-
-      // Save playbook record
-      const { data: playbookData, error: playbookError } = await supabase
-        .from('playbooks')
-        .insert([
-          {
-            name: file.name,
-            file_path: fileName,
-            team_id: selectedTeam.id,
-            content: extractedText
-          }
-        ])
-        .select()
-        .single();
-
-      if (playbookError) throw playbookError;
-
-      setPlaybooks(prev => [playbookData, ...prev]);
-      setUploadStatus('Playbook uploaded successfully!');
-
-      // Auto-extract plays from the PDF text
-      const { extractPlaysFromText } = await import('@/lib/pdfExtraction');
-      const extractedPlays = extractPlaysFromText(extractedText);
-
-      if (extractedPlays.length > 0) {
-        setUploadStatus(`Found ${extractedPlays.length} potential plays. Adding to team...`);
-
-        // Add extracted plays to the database
-        const { data: newPlays, error: playsError } = await supabase
-          .from('plays')
-          .insert(
-            extractedPlays.slice(0, 20).map(play => ({
-              name: play.name,
-              formation: play.formation || 'From PDF',
-              team_id: selectedTeam.id,
-              description: play.description
-            }))
-          )
-          .select();
-
-        if (playsError) {
-          console.warn('Error adding extracted plays:', playsError);
-        } else {
-          setPlays(prev => [...(newPlays || []), ...prev]);
-          setUploadStatus(`Successfully added ${newPlays?.length || 0} plays from PDF!`);
-        }
-      }
-
-      setTimeout(() => {
-        setUploadStatus('');
-      }, 3000);
-
-    } catch (error) {
-      console.error('Error processing playbook:', error);
-      setUploadStatus(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setTimeout(() => {
-        setUploadStatus('');
-      }, 5000);
-    } finally {
-      setIsUploading(false);
-      // Reset file input
-      if (event.target) {
-        event.target.value = '';
-      }
-    }
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Authentication Required</h1>
+          <p className="text-gray-600 mb-4">Please sign in to access this page.</p>
+          <a 
+            href="/auth/login"
+            className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            Sign In
+          </a>
+        </div>
+      </div>
+    );
   }
-
-  const TEAM_COLORS = [
-    "Red", "Blue", "Green", "Yellow", "Orange", "Purple", "Black", "White", 
-    "Navy", "Maroon", "Gold", "Silver", "Gray", "Pink", "Brown", "Teal"
-  ];
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-6xl mx-auto py-12 px-4">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">Team Setup & Management</h1>
-          <p className="text-xl text-gray-600">Create teams, upload playbooks, and manage your football strategies</p>
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">Team Management</h1>
+          <p className="text-xl text-gray-600">Create teams, upload playbooks, and manage your plays</p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Teams Section */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Teams</h2>
-              <button
-                onClick={() => setIsCreatingTeam(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Create New Team
-              </button>
-            </div>
-
-            {isCreatingTeam && (
-              <form onSubmit={teamForm.handleSubmit(onCreateTeam)} className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Team Name</label>
-                    <input
-                      {...teamForm.register('name', { required: 'Team name is required' })}
-                      type="text"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter team name"
-                    />
-                    {teamForm.formState.errors.name && (
-                      <p className="text-red-600 text-sm mt-1">{teamForm.formState.errors.name.message}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Team Color</label>
-                    <select
-                      {...teamForm.register('color', { required: 'Please select a color' })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select a color</option>
-                      {TEAM_COLORS.map(color => (
-                        <option key={color} value={color}>{color}</option>
-                      ))}
-                    </select>
-                    {teamForm.formState.errors.color && (
-                      <p className="text-red-600 text-sm mt-1">{teamForm.formState.errors.color.message}</p>
-                    )}
-                  </div>
-                  <div className="flex space-x-3">
-                    <button
-                      type="submit"
-                      className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors"
-                    >
-                      Create Team
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCreatingTeam(false);
-                        teamForm.reset();
-                      }}
-                      className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </form>
-            )}
-
-            <div className="space-y-3">
-              {teams.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">No teams created yet. Create your first team to get started!</p>
-              ) : (
-                teams.map(team => (
-                  <div
-                    key={team.id}
-                    onClick={() => selectTeam(team)}
-                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                      selectedTeam?.id === team.id
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="font-semibold text-lg text-gray-900">{team.name}</h3>
-                        <p className="text-sm text-gray-600">Color: {team.color || 'Not set'}</p>
-                      </div>
-                      {selectedTeam?.id === team.id && (
-                        <div className="text-blue-600">
-                          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
+        {/* Tab Navigation */}
+        <div className="mb-8">
+          <div className="flex border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('teams')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'teams'
+                  ? 'border-indigo-600 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Teams & Upload
+            </button>
+            <button
+              onClick={() => setActiveTab('playbook')}
+              disabled={!selectedTeamId}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'playbook' && selectedTeamId
+                  ? 'border-indigo-600 text-indigo-600'
+                  : 'border-transparent text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              Playbook Manager
+              {selectedTeamId && teams.find(t => t.id === selectedTeamId) && (
+                <span className="ml-2 text-xs">({teams.find(t => t.id === selectedTeamId)?.name})</span>
               )}
-            </div>
+            </button>
           </div>
+        </div>
 
-          {/* Team Management Section */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            {selectedTeam ? (
-              <>
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">
-                  Managing: <span className="text-blue-600">{selectedTeam.name}</span>
-                </h2>
-
-                {/* Playbook Upload */}
-                <div className="mb-8">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Upload Playbook</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Upload PDF Playbook
-                      </label>
-                      <input
-                        type="file"
-                        accept=".pdf"
-                        onChange={handlePlaybookUpload}
-                        disabled={isUploading}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50"
-                      />
+        {/* Tab Content */}
+        {activeTab === 'teams' ? (
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Create Team Section */}
+              <div className="bg-white rounded-lg shadow-lg p-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">Create New Team</h2>
+                
+                <div className="space-y-6">
+                  <div>
+                    <label htmlFor="teamName" className="block text-sm font-medium text-gray-700 mb-2">
+                      Team Name *
+                    </label>
+                    <input
+                      id="teamName"
+                      type="text"
+                      value={teamName}
+                      onChange={(e) => setTeamName(e.target.value)}
+                      placeholder="Enter your team name"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-gray-900"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="teamLevel" className="block text-sm font-medium text-gray-700 mb-2">
+                      Team Level
+                    </label>
+                    <input
+                      id="teamLevel"
+                      type="text"
+                      value={teamLevel}
+                      onChange={(e) => setTeamLevel(e.target.value)}
+                      placeholder="e.g., High School, College, Youth"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-gray-900"
+                    />
+                    <p className="text-sm text-gray-500 mt-1">Leave blank to default to "High School"</p>
+                  </div>
+                  
+                  <button
+                    onClick={createTeam}
+                    className="w-full bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                  >
+                    Create Team
+                  </button>
+                  
+                  {message && (
+                    <div className={`p-4 rounded-lg border ${
+                      message.includes('Success') 
+                        ? 'bg-green-50 border-green-200 text-green-700' 
+                        : 'bg-red-50 border-red-200 text-red-700'
+                    }`}>
+                      {message}
                     </div>
-
-                    {isUploading && (
-                      <div className="flex items-center space-x-2 text-blue-600">
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                        <span className="text-sm">Processing...</span>
-                      </div>
-                    )}
-
-                    {uploadStatus && (
-                      <div className={`text-sm p-3 rounded-md ${
-                        uploadStatus.includes('Error') || uploadStatus.includes('Failed')
-                          ? 'text-red-700 bg-red-50'
-                          : 'text-green-700 bg-green-50'
-                      }`}>
-                        {uploadStatus}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Manual Play Addition */}
-                <div className="mb-8">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Plays ({plays.length})</h3>
-                    <button
-                      onClick={() => setIsAddingPlay(true)}
-                      className="bg-green-600 text-white px-3 py-1 rounded-md hover:bg-green-700 transition-colors text-sm"
-                    >
-                      Add Play
-                    </button>
-                  </div>
-
-                  {isAddingPlay && (
-                    <form onSubmit={playForm.handleSubmit(onAddPlay)} className="mb-4 p-4 bg-gray-50 rounded-lg">
-                      <div className="space-y-3">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Play Name</label>
-                          <input
-                            {...playForm.register('name', { required: 'Play name is required' })}
-                            type="text"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                            placeholder="Enter play name"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Formation (Optional)</label>
-                          <input
-                            {...playForm.register('formation')}
-                            type="text"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                            placeholder="e.g., I-Formation, Shotgun, etc."
-                          />
-                        </div>
-                        <div className="flex space-x-3">
-                          <button
-                            type="submit"
-                            className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors"
-                          >
-                            Add Play
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsAddingPlay(false);
-                              playForm.reset();
-                            }}
-                            className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    </form>
                   )}
+                </div>
+              </div>
 
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {plays.length === 0 ? (
-                      <p className="text-gray-500 text-center py-4">No plays added yet. Upload a playbook or add plays manually!</p>
-                    ) : (
-                      plays.map(play => (
-                        <div key={play.id} className="p-3 bg-gray-50 rounded-md">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <h4 className="font-medium text-gray-900">{play.name}</h4>
-                              <p className="text-sm text-gray-600">Formation: {play.formation || 'Not specified'}</p>
-                            </div>
+              {/* Teams List Section */}
+              <div className="bg-white rounded-lg shadow-lg p-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Teams</h2>
+                
+                {teams.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <svg className="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 48 48">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M17 20h5v8a1 1 0 01-1 1H9a1 1 0 01-1-1v-8h5m8-8v8m0-8c0-1.105-.895-2-2-2H10c-1.105 0-2 .895-2 2m8 0V8a2 2 0 00-2-2H8a2 2 0 00-2 2v4m8 0V8m0 4H8m0 0v8h8v-8H8z" />
+                    </svg>
+                    <p>No teams created yet</p>
+                    <p className="text-sm">Create your first team to get started</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {teams.map((team) => (
+                      <div
+                        key={team.id}
+                        onClick={() => setSelectedTeamId(team.id)}
+                        className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                          selectedTeamId === team.id
+                            ? 'border-indigo-500 bg-indigo-50'
+                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold text-lg text-gray-900">{team.name}</h3>
+                            <p className="text-sm text-gray-600">{team.level}</p>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            {selectedTeamId === team.id && (
+                              <div className="text-indigo-600">
+                                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                              </div>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedTeamId(team.id);
+                                setActiveTab('playbook');
+                              }}
+                              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                            >
+                              View Playbook
+                            </button>
                           </div>
                         </div>
-                      ))
-                    )}
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
 
-                {/* Playbooks List */}
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Uploaded Playbooks ({playbooks.length})</h3>
-                  <div className="space-y-2">
-                    {playbooks.length === 0 ? (
-                      <p className="text-gray-500 text-center py-4">No playbooks uploaded yet.</p>
-                    ) : (
-                      playbooks.map(playbook => (
-                        <div key={playbook.id} className="p-3 bg-gray-50 rounded-md">
-                          <h4 className="font-medium text-gray-900">{playbook.name}</h4>
-                          <p className="text-sm text-gray-600">Uploaded successfully</p>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                {/* Navigation to Film Page */}
+                <div className="mt-8 pt-6 border-t border-gray-200">
+                  <a
+                    href="/film"
+                    className="w-full flex items-center justify-center px-6 py-3 border border-indigo-600 text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
+                  >
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Manage Game Film
+                  </a>
                 </div>
-              </>
-            ) : (
-              <div className="text-center py-12">
-                <div className="text-gray-400 mb-4">
-                  <svg className="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V8zm0 4a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1v-2z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Select a Team</h3>
-                <p className="text-gray-600">Choose a team from the left panel to manage plays and upload playbooks.</p>
+              </div>
+            </div>
+
+            {/* PDF Upload Section */}
+            {selectedTeamId && (
+              <div className="mt-8 bg-white rounded-lg shadow-lg p-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">
+                  Upload Playbook for {teams.find(t => t.id === selectedTeamId)?.name}
+                </h2>
+                <PlaybookUpload 
+                  teamId={selectedTeamId}
+                  onPlaysExtracted={(plays) => {
+                    console.log('Plays extracted:', plays);
+                  }}
+                  onUploadComplete={() => {
+                    console.log('Upload complete!');
+                    // Switch to playbook tab after upload
+                    setActiveTab('playbook');
+                  }}
+                />
               </div>
             )}
-          </div>
+          </>
+        ) : (
+          /* Playbook Manager Tab */
+          selectedTeamId && (
+            <PlaybookViewer 
+              teamId={selectedTeamId}
+              teamName={teams.find(t => t.id === selectedTeamId)?.name || 'Unknown Team'}
+            />
+          )
+        )}
+
+        {/* User Info */}
+        <div className="mt-8 text-center text-sm text-gray-600">
+          Signed in as: <span className="font-medium">{user.email}</span>
         </div>
       </div>
     </div>

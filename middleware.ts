@@ -1,41 +1,40 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = new Set([
-  "/", "/login", "/_next", "/favicon.ico",
-  "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"
-]);
+export async function middleware(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({
+    request,
+  })
 
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({
+            request,
+          })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
 
-  // allow public assets and whitelisted paths
-  if ([...PUBLIC_PATHS].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
-    return NextResponse.next();
-  }
+  // This will refresh session if expired - required for Server Components
+  await supabase.auth.getUser()
 
-  const hasAccessToken = Boolean(
-    req.cookies.get("sb-access-token") ||
-    req.cookies.get("supabase-auth-token") ||
-    req.cookies.get("sb:token")
-  );
-
-  if (!hasAccessToken) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(url);
-  }
-
-  if (hasAccessToken && pathname === "/login") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
-  }
-
-  return NextResponse.next();
+  return supabaseResponse
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|apple-touch-icon.png|apple-touch-icon-precomposed.png).*)"],
-};
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+}

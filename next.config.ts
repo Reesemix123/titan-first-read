@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-
 const nextConfig: NextConfig = {
   webpack: (config, { isServer }) => {
     // Handle canvas module for client-side
@@ -21,5 +20,4 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
 };
-
 export default nextConfig;

@@ -40,6 +40,12 @@ export default function RootLayout({
                     Teams
                   </Link>
                   <Link 
+                    href="/playbook" 
+                    className="text-gray-800 hover:text-black font-medium text-lg transition-colors"
+                  >
+                    Playbook
+                  </Link>
+                  <Link 
                     href="/film" 
                     className="text-gray-800 hover:text-black font-medium text-lg transition-colors"
                   >
@@ -47,7 +53,6 @@ export default function RootLayout({
                   </Link>
                 </div>
               </div>
-
               {/* User Menu */}
               <UserMenu />
             </div>

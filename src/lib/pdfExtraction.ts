@@ -7,43 +7,37 @@ if (typeof window !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
 }
 
-interface ExtractedContent {
+export interface ExtractedPlay {
+  name: string;
+  pageNumber: number;
+  confidence: 'high' | 'medium' | 'low';
+  imageDataUrl?: string;
+  formation?: string;
+  description?: string;
+}
+
+export interface ExtractedPage {
+  pageNumber: number;
   text: string;
-  images: string[];
+  imageDataUrl?: string;
 }
 
-interface PDFDocumentProxy {
-  numPages: number;
-  getPage: (pageNumber: number) => Promise<PDFPageProxy>;
-}
-
-interface PDFPageProxy {
-  getTextContent: () => Promise<{ items: TextItem[] }>;
-  getOperatorList: () => Promise<{ fnArray: number[]; argsArray: unknown[][] }>;
-  objs: {
-    get: (name: string) => Promise<unknown>;
-  };
-}
-
-export async function extractPDFContent(file: File): Promise<ExtractedContent> {
+export async function extractPDFPages(file: File): Promise<ExtractedPage[]> {
   try {
     // Dynamic import for client-side only
     const pdfJS = await import('pdfjs-dist/webpack.mjs');
     
     // Set up the worker - Next.js 15 compatible path
     pdfJS.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
-
+    
     // Convert file to array buffer
     const arrayBuffer = await file.arrayBuffer();
     
     // Load the PDF document
     const pdf = await pdfJS.getDocument(arrayBuffer).promise;
     
-    const extractedContent: ExtractedContent = {
-      text: '',
-      images: []
-    };
-
+    const pages: ExtractedPage[] = [];
+    
     // Process each page
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
@@ -54,84 +48,130 @@ export async function extractPDFContent(file: File): Promise<ExtractedContent> {
         .map((item: TextItem) => item.str)
         .join(' ');
       
-      extractedContent.text += pageText + '\n';
-
-      // Extract images (optional - can be resource intensive)
+      // Extract page as image
+      let imageDataUrl: string | undefined;
       try {
-        const operators = await page.getOperatorList();
-        for (let i = 0; i < operators.fnArray.length; i++) {
-          if (operators.fnArray[i] === pdfJS.OPS.paintImageXObject) {
-            const imageName = operators.argsArray[i][0];
-            try {
-              const image = await page.objs.get(imageName);
-              if (image) {
-                // Convert image to base64 if needed
-                // This is a simplified version - you might want to add more processing
-                extractedContent.images.push(`image_${pageNum}_${i}`);
-              }
-            } catch (imageError) {
-              console.warn(`Could not extract image ${imageName}:`, imageError);
-            }
-          }
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        
+        if (context) {
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          
+          await page.render({
+            canvasContext: context,
+            viewport: viewport
+          }).promise;
+          
+          imageDataUrl = canvas.toDataURL('image/png');
         }
-      } catch (imageError) {
-        console.warn(`Could not extract images from page ${pageNum}:`, imageError);
+      } catch (renderError) {
+        console.warn(`Could not render page ${pageNum} as image:`, renderError);
       }
+      
+      pages.push({
+        pageNumber: pageNum,
+        text: pageText,
+        imageDataUrl
+      });
     }
-
-    return extractedContent;
-  } catch (error) {
-    console.error('Error extracting PDF content:', error);
-    throw new Error(`Failed to extract PDF content: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-}
-
-// Alternative simpler version for just text extraction
-export async function extractPDFText(file: File): Promise<string> {
-  try {
-    const pdfJS = await import('pdfjs-dist/webpack.mjs');
-    pdfJS.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
-
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfJS.getDocument(arrayBuffer).promise;
     
-    let fullText = '';
-
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      
-      const pageText = textContent.items
-        .map((item: TextItem) => item.str)
-        .join(' ');
-      
-      fullText += pageText + '\n';
-    }
-
-    return fullText.trim();
+    return pages;
   } catch (error) {
-    console.error('Error extracting PDF text:', error);
-    throw new Error(`Failed to extract PDF text: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    console.error('Error extracting PDF pages:', error);
+    throw new Error(`Failed to extract PDF pages: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 
-// Play extraction function with proper typing
+export function extractPlaysFromPages(pages: ExtractedPage[]): ExtractedPlay[] {
+  const plays: ExtractedPlay[] = [];
+  
+  for (const page of pages) {
+    const lines = page.text.split('\n');
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      // Skip empty lines and very short lines
+      if (trimmedLine.length < 3) continue;
+      
+      // Look for play patterns - adjust these rules based on your PDF format
+      let confidence: 'high' | 'medium' | 'low' = 'low';
+      let playName = trimmedLine;
+      
+      // High confidence: Lines that look like play names
+      if (trimmedLine.match(/^[A-Z][a-zA-Z\s\-]{2,30}$/)) {
+        confidence = 'high';
+      }
+      // Medium confidence: Lines with numbers/codes
+      else if (trimmedLine.match(/^[A-Z0-9\-\s]{3,20}$/)) {
+        confidence = 'medium';
+      }
+      // Low confidence: Other text that might be plays
+      else if (trimmedLine.match(/[A-Za-z]{3,}/)) {
+        confidence = 'low';
+        // Skip very common words that are unlikely to be play names
+        const commonWords = ['the', 'and', 'for', 'with', 'this', 'that', 'from', 'they', 'have', 'will'];
+        if (commonWords.some(word => trimmedLine.toLowerCase().includes(word))) {
+          continue;
+        }
+      } else {
+        continue; // Skip this line
+      }
+      
+      // Avoid duplicates
+      if (plays.some(play => play.name === playName)) {
+        continue;
+      }
+      
+      plays.push({
+        name: playName,
+        pageNumber: page.pageNumber,
+        confidence,
+        imageDataUrl: page.imageDataUrl,
+        formation: 'Unknown',
+        description: 'Extracted from PDF'
+      });
+    }
+  }
+  
+  // Sort by confidence and page number
+  return plays.sort((a, b) => {
+    const confidenceOrder = { high: 3, medium: 2, low: 1 };
+    if (confidenceOrder[a.confidence] !== confidenceOrder[b.confidence]) {
+      return confidenceOrder[b.confidence] - confidenceOrder[a.confidence];
+    }
+    return a.pageNumber - b.pageNumber;
+  });
+}
+
+// Legacy functions for backward compatibility
+export async function extractPDFContent(file: File): Promise<{ text: string; images: string[] }> {
+  const pages = await extractPDFPages(file);
+  return {
+    text: pages.map(page => page.text).join('\n'),
+    images: pages.map(page => page.imageDataUrl).filter(Boolean) as string[]
+  };
+}
+
+export async function extractPDFText(file: File): Promise<string> {
+  const pages = await extractPDFPages(file);
+  return pages.map(page => page.text).join('\n');
+}
+
 export function extractPlaysFromText(text: string): Array<{ name: string; formation?: string; description?: string }> {
-  const plays: Array<{ name: string; formation?: string; description?: string }> = [];
   const lines = text.split('\n');
+  const plays: Array<{ name: string; formation?: string; description?: string }> = [];
   
   for (const line of lines) {
     const trimmedLine = line.trim();
-    if (trimmedLine.length > 0) {
-      // Simple play detection - you may want to improve this logic
-      if (trimmedLine.match(/^[A-Z][a-zA-Z\s]+$/)) {
-        const playName = trimmedLine;
-        plays.push({
-          name: playName,
-          formation: 'Unknown',
-          description: 'Extracted from PDF'
-        });
-      }
+    if (trimmedLine.length > 0 && trimmedLine.match(/^[A-Z][a-zA-Z\s]+$/)) {
+      plays.push({
+        name: trimmedLine,
+        formation: 'Unknown',
+        description: 'Extracted from PDF'
+      });
     }
   }
   
