@@ -1,12 +1,20 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import type { PlayAttributes, PlayDiagram } from '@/types/football';
 
 interface PlayBuilderProps {
   teamId: string;
   teamName: string;
+  existingPlay?: {
+    id: string;
+    play_code: string;
+    play_name: string;
+    attributes: any;
+    diagram: any;
+    comments?: string;
+  } | null;
 }
 
 interface Player {
@@ -39,7 +47,7 @@ interface PlayDiagram {
   fieldPosition: { yard: number; hash: 'left' | 'middle' | 'right' };
 }
 
-// HUDL-style formation organization
+// Formation definitions
 const offensiveFormations = {
   'Gun Spread 11': [
     { position: 'QB', x: 300, y: 360, label: 'QB' },
@@ -282,15 +290,6 @@ const ballCarrierOptions = [
   { value: 'WR', description: 'Wide Receiver - End around/jet sweep' }
 ];
 
-const personnelGroupings = {
-  '10': '1 RB, 0 TE, 4 WR - Spread/passing formation',
-  '11': '1 RB, 1 TE, 3 WR - Most common balanced formation', 
-  '12': '1 RB, 2 TE, 2 WR - Heavy/power running formation',
-  '20': '2 RB, 0 TE, 3 WR - Two back set for power',
-  '21': '2 RB, 1 TE, 2 WR - Classic I-Formation personnel',
-  '22': '2 RB, 2 TE, 1 WR - Goal line/short yardage'
-};
-
 const coverageOptions = [
   { value: 'Cover 0', description: 'Cover 0 - Man coverage, no deep safety help' },
   { value: 'Cover 1', description: 'Cover 1 - Man coverage with 1 deep safety' },
@@ -328,7 +327,7 @@ const formationDescriptions = {
   'Field Goal Standard': 'Standard field goal/extra point formation'
 };
 
-export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
+export default function PlayBuilder({ teamId, teamName, existingPlay }: PlayBuilderProps) {
   const supabase = createClient();
   const [currentPlay, setCurrentPlay] = useState<PlayDiagram>({
     players: [],
@@ -352,6 +351,42 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
   const [routeMode, setRouteMode] = useState<'pass' | 'block' | 'motion'>('pass');
   const [selectedRouteType, setSelectedRouteType] = useState<string>('');
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Load existing play data when editing
+  useEffect(() => {
+    if (existingPlay) {
+      setPlayName(existingPlay.play_name);
+      
+      // Load ODK
+      const odk = existingPlay.attributes?.odk === 'offense' ? 'Offense' :
+                  existingPlay.attributes?.odk === 'defense' ? 'Defense' : 'Special Teams';
+      
+      // Load formation and diagram
+      setSelectedFormation(existingPlay.attributes?.formation || '');
+      
+      // Load play-specific attributes
+      if (existingPlay.attributes?.playType) setSelectedPlayType(existingPlay.attributes.playType);
+      if (existingPlay.attributes?.coverage) setSelectedCoverage(existingPlay.attributes.coverage);
+      if (existingPlay.attributes?.blitzType) setSelectedBlitz(existingPlay.attributes.blitzType);
+      if (existingPlay.attributes?.unit) setSelectedSTUnit(existingPlay.attributes.unit);
+      if (existingPlay.attributes?.targetHole) setTargetHole(existingPlay.attributes.targetHole);
+      if (existingPlay.attributes?.ballCarrier) setBallCarrier(existingPlay.attributes.ballCarrier);
+      
+      // Load diagram with players and routes
+      if (existingPlay.diagram) {
+        setCurrentPlay({
+          players: existingPlay.diagram.players || [],
+          routes: existingPlay.diagram.routes || [],
+          formation: existingPlay.diagram.formation || existingPlay.attributes?.formation || '',
+          odk: odk,
+          playType: existingPlay.diagram.playType,
+          targetHole: existingPlay.diagram.targetHole,
+          ballCarrier: existingPlay.diagram.ballCarrier,
+          fieldPosition: existingPlay.diagram.fieldPosition || { yard: 25, hash: 'middle' }
+        });
+      }
+    }
+  }, [existingPlay]);
 
   const fieldWidth = 600;
   const fieldHeight = 400;
@@ -479,24 +514,6 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
     }
 
     try {
-      const { data: existingPlays } = await supabase
-        .from('playbook_plays')
-        .select('play_code')
-        .eq('team_id', teamId === 'personal' ? null : teamId)
-        .order('play_code', { ascending: false })
-        .limit(1);
-
-      let nextNumber = 1;
-      if (existingPlays && existingPlays.length > 0) {
-        const lastCode = existingPlays[0].play_code;
-        const match = lastCode?.match(/P-(\d+)/);
-        if (match) {
-          nextNumber = parseInt(match[1]) + 1;
-        }
-      }
-
-      const playCode = `P-${String(nextNumber).padStart(3, '0')}`;
-
       // Build attributes object - explicit ODK conversion
       const attributes: any = {
         odk: currentPlay.odk === 'Offense' ? 'offense' : 
@@ -538,23 +555,58 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
       if (ballCarrier) diagram.ballCarrier = ballCarrier;
       if (selectedPlayType) diagram.playType = selectedPlayType;
 
-      const newPlay = {
-        team_id: teamId === 'personal' ? null : teamId,
-        play_name: playName.trim(),
-        play_code: playCode,
-        attributes,
-        diagram,
-        extraction_confidence: 'drawn',
-        is_archived: false
-      };
+      if (existingPlay) {
+        // UPDATE existing play
+        const { error } = await supabase
+          .from('playbook_plays')
+          .update({
+            play_name: playName.trim(),
+            attributes,
+            diagram
+          })
+          .eq('id', existingPlay.id);
 
-      const { error } = await supabase
-        .from('playbook_plays')
-        .insert([newPlay]);
+        if (error) throw error;
 
-      if (error) throw error;
+        alert(`Play "${playName}" (${existingPlay.play_code}) updated successfully!`);
+      } else {
+        // INSERT new play
+        const { data: existingPlays } = await supabase
+          .from('playbook_plays')
+          .select('play_code')
+          .eq('team_id', teamId === 'personal' ? null : teamId)
+          .order('play_code', { ascending: false })
+          .limit(1);
 
-      alert(`Play "${playName}" saved successfully as ${playCode}!`);
+        let nextNumber = 1;
+        if (existingPlays && existingPlays.length > 0) {
+          const lastCode = existingPlays[0].play_code;
+          const match = lastCode?.match(/P-(\d+)/);
+          if (match) {
+            nextNumber = parseInt(match[1]) + 1;
+          }
+        }
+
+        const playCode = `P-${String(nextNumber).padStart(3, '0')}`;
+
+        const newPlay = {
+          team_id: teamId === 'personal' ? null : teamId,
+          play_name: playName.trim(),
+          play_code: playCode,
+          attributes,
+          diagram,
+          extraction_confidence: 'drawn',
+          is_archived: false
+        };
+
+        const { error } = await supabase
+          .from('playbook_plays')
+          .insert([newPlay]);
+
+        if (error) throw error;
+
+        alert(`Play "${playName}" saved successfully as ${playCode}!`);
+      }
       
       clearPlay();
 
@@ -574,7 +626,9 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow-lg p-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Play Builder - {teamName}</h2>
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
+          {existingPlay ? `Edit Play ${existingPlay.play_code}` : `Create New Play`} - {teamName}
+        </h2>
         
         <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
           <div>
@@ -639,11 +693,6 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
                     </option>
                   ))}
                 </select>
-                {selectedPlayType && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {playTypeOptions['Offense'].find(t => t.value === selectedPlayType)?.description}
-                  </p>
-                )}
               </div>
 
               {selectedPlayType === 'Run' && (
@@ -657,16 +706,11 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
                     >
                       <option value="">Select Hole</option>
                       {offensiveHoles['withTE'].map(hole => (
-                        <option key={hole.value} value={hole.value} title={hole.description}>
+                        <option key={hole.value} value={hole.value}>
                           {hole.value}
                         </option>
                       ))}
                     </select>
-                    {targetHole && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        {offensiveHoles['withTE'].find(h => h.value === targetHole)?.description}
-                      </p>
-                    )}
                   </div>
 
                   <div>
@@ -678,16 +722,11 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
                     >
                       <option value="">Select Carrier</option>
                       {ballCarrierOptions.map(carrier => (
-                        <option key={carrier.value} value={carrier.value} title={carrier.description}>
+                        <option key={carrier.value} value={carrier.value}>
                           {carrier.value}
                         </option>
                       ))}
                     </select>
-                    {ballCarrier && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        {ballCarrierOptions.find(c => c.value === ballCarrier)?.description}
-                      </p>
-                    )}
                   </div>
                 </>
               )}
@@ -705,16 +744,11 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
                 >
                   <option value="">Select Coverage</option>
                   {coverageOptions.map(coverage => (
-                    <option key={coverage.value} value={coverage.value} title={coverage.description}>
+                    <option key={coverage.value} value={coverage.value}>
                       {coverage.value}
                     </option>
                   ))}
                 </select>
-                {selectedCoverage && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {coverageOptions.find(c => c.value === selectedCoverage)?.description}
-                  </p>
-                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Blitz</label>
@@ -725,16 +759,11 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
                 >
                   <option value="">Select Blitz</option>
                   {blitzOptions.map(blitz => (
-                    <option key={blitz.value} value={blitz.value} title={blitz.description}>
+                    <option key={blitz.value} value={blitz.value}>
                       {blitz.value}
                     </option>
                   ))}
                 </select>
-                {selectedBlitz && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {blitzOptions.find(b => b.value === selectedBlitz)?.description}
-                  </p>
-                )}
               </div>
             </>
           )}
@@ -770,7 +799,7 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
             disabled={!playName.trim() || currentPlay.players.length === 0}
             className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
-            Save Play
+            {existingPlay ? 'Update Play' : 'Save Play'}
           </button>
         </div>
 
@@ -806,16 +835,16 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
                     className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-gray-900"
                   >
                     <option value="">Select Route</option>
-                    <option value="slant">Slant - Quick 45° inside cut</option>
-                    <option value="out">Out - 90° cut to sideline</option>
-                    <option value="go">Go - Straight upfield</option>
-                    <option value="post">Post - Deep cut to goal posts</option>
-                    <option value="hitch">Hitch - Stop and turn back</option>
-                    <option value="drag">Drag - Shallow cross</option>
-                    <option value="comeback">Comeback - Deep return to QB</option>
-                    <option value="corner">Corner - Break to corner</option>
-                    <option value="seam">Seam - Up the middle</option>
-                    <option value="flat">Flat - Quick to sideline</option>
+                    <option value="slant">Slant</option>
+                    <option value="out">Out</option>
+                    <option value="go">Go</option>
+                    <option value="post">Post</option>
+                    <option value="hitch">Hitch</option>
+                    <option value="drag">Drag</option>
+                    <option value="comeback">Comeback</option>
+                    <option value="corner">Corner</option>
+                    <option value="seam">Seam</option>
+                    <option value="flat">Flat</option>
                   </select>
                 </div>
               )}
@@ -829,11 +858,11 @@ export default function PlayBuilder({ teamId, teamName }: PlayBuilderProps) {
                     className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-gray-900"
                   >
                     <option value="">Select Block</option>
-                    <option value="zone">Zone - Block area/gap</option>
-                    <option value="man">Man - Block specific defender</option>
-                    <option value="combo">Combo - Double team block</option>
-                    <option value="pull">Pull - Move to different gap</option>
-                    <option value="pass-pro">Pass Pro - Pass protection</option>
+                    <option value="zone">Zone</option>
+                    <option value="man">Man</option>
+                    <option value="combo">Combo</option>
+                    <option value="pull">Pull</option>
+                    <option value="pass-pro">Pass Pro</option>
                   </select>
                 </div>
               )}

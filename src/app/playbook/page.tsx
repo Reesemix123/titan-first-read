@@ -431,9 +431,10 @@ export default function PlaybookPage() {
             </div>
             
             <PlayBuilder 
-              teamId={selectedTeamId || 'personal'} 
-              teamName={selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name || 'Unknown Team' : 'Personal Playbook'}
-            />
+  teamId={selectedTeamId || 'personal'} 
+  teamName={selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name || 'Unknown Team' : 'Personal Playbook'}
+  existingPlay={editingPlay}
+/>
           </>
         )}
 
