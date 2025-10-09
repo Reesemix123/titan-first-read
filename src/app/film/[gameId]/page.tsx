@@ -99,6 +99,10 @@ export default function GameFilmPage() {
   const [tagEndTime, setTagEndTime] = useState<number | null>(null);
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [isSettingEndTime, setIsSettingEndTime] = useState(false);
+  const [showQuickAddPlay, setShowQuickAddPlay] = useState(false);
+  const [quickPlayName, setQuickPlayName] = useState('');
+  const [quickPlayODK, setQuickPlayODK] = useState<'offense' | 'defense' | 'specialTeams'>('offense');
+  const [isAddingPlay, setIsAddingPlay] = useState(false);
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<PlayTagForm>();
 
@@ -183,6 +187,80 @@ export default function GameFilmPage() {
     if (!error && data) {
       setPlays(data);
     }
+  }
+
+  async function generateNextPlayCode(): Promise<string> {
+    if (!game?.team_id) return 'P-001';
+
+    const { data } = await supabase
+      .from('playbook_plays')
+      .select('play_code')
+      .eq('team_id', game.team_id)
+      .order('play_code', { ascending: false })
+      .limit(1);
+
+    if (!data || data.length === 0) return 'P-001';
+
+    const lastCode = data[0].play_code;
+    const match = lastCode.match(/P-(\d+)/);
+    if (match) {
+      const nextNum = parseInt(match[1]) + 1;
+      return `P-${nextNum.toString().padStart(3, '0')}`;
+    }
+    return 'P-001';
+  }
+
+  async function handleQuickAddPlay() {
+    if (!quickPlayName.trim() || !game?.team_id) {
+      alert('Please enter a play name');
+      return;
+    }
+
+    setIsAddingPlay(true);
+
+    const playCode = await generateNextPlayCode();
+
+    const newPlay = {
+      team_id: game.team_id,
+      play_code: playCode,
+      play_name: quickPlayName.trim(),
+      attributes: {
+        odk: quickPlayODK,
+        formation: '',
+        customTags: []
+      },
+      diagram: {
+        players: [],
+        routes: [],
+        formation: '',
+        odk: quickPlayODK
+      },
+      is_archived: false
+    };
+
+    const { data, error } = await supabase
+      .from('playbook_plays')
+      .insert([newPlay])
+      .select()
+      .single();
+
+    if (error) {
+      alert('Error adding play: ' + error.message);
+      setIsAddingPlay(false);
+      return;
+    }
+
+    // Refresh plays list
+    await fetchPlays();
+
+    // Auto-select the new play
+    setValue('play_code', playCode);
+
+    // Reset form
+    setQuickPlayName('');
+    setQuickPlayODK('offense');
+    setShowQuickAddPlay(false);
+    setIsAddingPlay(false);
   }
 
   async function fetchPlayInstances(videoId: string) {
@@ -339,6 +417,9 @@ export default function GameFilmPage() {
 
     setShowTagModal(false);
     setEditingInstance(null);
+    setShowQuickAddPlay(false);
+    setQuickPlayName('');
+    setQuickPlayODK('offense');
     reset();
     fetchPlayInstances(selectedVideo.id);
   }
@@ -772,6 +853,68 @@ export default function GameFilmPage() {
                   ))}
                 </select>
                 {errors.play_code && <p className="text-red-600 text-sm mt-1 font-medium">{errors.play_code.message}</p>}
+                
+                {/* Quick Add Play Link */}
+                <button
+                  type="button"
+                  onClick={() => setShowQuickAddPlay(!showQuickAddPlay)}
+                  className="text-sm text-indigo-600 hover:text-indigo-800 font-medium mt-2 flex items-center space-x-1"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>{showQuickAddPlay ? 'Cancel' : 'Play not in playbook? Add it here'}</span>
+                </button>
+
+                {/* Quick Add Form */}
+                {showQuickAddPlay && (
+                  <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200">
+                    <h4 className="text-sm font-bold text-gray-900 mb-3">Quick Add Play</h4>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-800 mb-1">
+                          Play Name <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={quickPlayName}
+                          onChange={(e) => setQuickPlayName(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 font-medium text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="e.g., Inside Zone Right"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-800 mb-1">
+                          Type <span className="text-red-600">*</span>
+                        </label>
+                        <select
+                          value={quickPlayODK}
+                          onChange={(e) => setQuickPlayODK(e.target.value as 'offense' | 'defense' | 'specialTeams')}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 font-medium text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="offense">Offense</option>
+                          <option value="defense">Defense</option>
+                          <option value="specialTeams">Special Teams</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleQuickAddPlay}
+                        disabled={isAddingPlay || !quickPlayName.trim()}
+                        className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {isAddingPlay ? 'Adding...' : 'Add Play to Playbook'}
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-gray-600 mt-2">
+                      Play code will be auto-generated. You can add formations and routes later in the Playbook page.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -867,6 +1010,9 @@ export default function GameFilmPage() {
                     setShowTagModal(false);
                     setEditingInstance(null);
                     setIsSettingEndTime(false);
+                    setShowQuickAddPlay(false);
+                    setQuickPlayName('');
+                    setQuickPlayODK('offense');
                     reset();
                   }}
                   className="flex-1 px-4 py-2 border-2 border-gray-300 rounded-md hover:bg-gray-50 font-semibold text-gray-800 transition-colors"

@@ -18,6 +18,7 @@ interface Game {
   opponent?: string;
   date?: string;
   team_id?: string;
+  is_opponent_game?: boolean;
   video_count?: number;
   play_count?: number;
 }
@@ -35,6 +36,7 @@ export default function FilmPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<string>('');
   const [games, setGames] = useState<Game[]>([]);
+  const [viewMode, setViewMode] = useState<'own' | 'opponent'>('own');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
 
@@ -50,7 +52,7 @@ export default function FilmPage() {
     } else {
       setGames([]);
     }
-  }, [selectedTeam]);
+  }, [selectedTeam, viewMode]);
 
   async function fetchTeams() {
     const { data, error } = await supabase
@@ -64,22 +66,37 @@ export default function FilmPage() {
   }
 
   async function fetchGames() {
+    const isOpponentView = viewMode === 'opponent';
+    
     const { data, error } = await supabase
       .from('games')
-      .select(`
-        *,
-        videos(count),
-        play_instances:play_instances(count)
-      `)
+      .select('*')
       .eq('team_id', selectedTeam)
+      .eq('is_opponent_game', isOpponentView)
       .order('date', { ascending: false });
 
     if (!error && data) {
-      const gamesWithCounts = data.map(game => ({
-        ...game,
-        video_count: game.videos?.[0]?.count || 0,
-        play_count: game.play_instances?.[0]?.count || 0
-      }));
+      // Get counts separately for each game
+      const gamesWithCounts = await Promise.all(
+        data.map(async (game) => {
+          const { count: videoCount } = await supabase
+            .from('videos')
+            .select('*', { count: 'exact', head: true })
+            .eq('game_id', game.id);
+
+          const { count: playCount } = await supabase
+            .from('play_instances')
+            .select('*', { count: 'exact', head: true })
+            .eq('video_id', game.id);
+
+          return {
+            ...game,
+            video_count: videoCount || 0,
+            play_count: playCount || 0
+          };
+        })
+      );
+      
       setGames(gamesWithCounts);
     }
   }
@@ -103,9 +120,10 @@ export default function FilmPage() {
       .from('games')
       .insert([{
         date: values.date,
-        name: `vs ${values.opponent}`,
+        name: viewMode === 'opponent' ? `${values.opponent} (Opponent)` : `vs ${values.opponent}`,
         opponent: values.opponent,
         team_id: selectedTeam,
+        is_opponent_game: viewMode === 'opponent',
         user_id: user.id
       }])
       .select()
@@ -197,10 +215,37 @@ export default function FilmPage() {
           </div>
 
           {selectedTeam && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <>
+              {/* View Mode Toggle */}
+              <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => setViewMode('own')}
+                    className={viewMode === 'own'
+                      ? 'flex-1 px-4 py-2 bg-indigo-600 text-white rounded-md font-semibold transition-colors'
+                      : 'flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 font-semibold transition-colors'
+                    }
+                  >
+                    Your Games
+                  </button>
+                  <button
+                    onClick={() => setViewMode('opponent')}
+                    className={viewMode === 'opponent'
+                      ? 'flex-1 px-4 py-2 bg-indigo-600 text-white rounded-md font-semibold transition-colors'
+                      : 'flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 font-semibold transition-colors'
+                    }
+                  >
+                    Opponent Scouting
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Create Game Form */}
               <div className="bg-white rounded-lg shadow-lg p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">Add New Game</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-4">
+                  {viewMode === 'opponent' ? 'Add Opponent Game' : 'Add Your Game'}
+                </h2>
                 
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                   <div>
@@ -214,7 +259,9 @@ export default function FilmPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Opponent</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {viewMode === 'opponent' ? 'Opponent Team' : 'Opponent'}
+                    </label>
                     <input
                       {...register('opponent', { required: 'Opponent is required' })}
                       type="text"
@@ -253,11 +300,17 @@ export default function FilmPage() {
 
               {/* Games Grid */}
               <div className="lg:col-span-2">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">Games ({games.length})</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-4">
+                  {viewMode === 'opponent' ? 'Opponent Games' : 'Your Games'} ({games.length})
+                </h2>
                 
                 {games.length === 0 ? (
                   <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-                    <p className="text-gray-500 text-lg">No games yet. Create your first game!</p>
+                    <p className="text-gray-500 text-lg">
+                      {viewMode === 'opponent' 
+                        ? 'No opponent games yet. Add your first opponent scouting film!' 
+                        : 'No games yet. Create your first game!'}
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -324,6 +377,7 @@ export default function FilmPage() {
                 )}
               </div>
             </div>
+            </>
           )}
         </div>
       </div>
