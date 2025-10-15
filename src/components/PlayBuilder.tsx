@@ -11,6 +11,7 @@ import {
   DEFENSIVE_ATTRIBUTES,
   SPECIAL_TEAMS_ATTRIBUTES,
   BLOCKING_ASSIGNMENTS,
+  BLOCK_RESPONSIBILITIES,
   PASSING_ROUTES,
   RUNNING_HOLES,
   getAttributeOptions,
@@ -463,40 +464,64 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       return { x: 350, y: 195 };
     }
 
-    const center = sortedLinemen.find(p => p.position === 'C');
-    const lg = sortedLinemen.find(p => p.position === 'LG');
-    const rg = sortedLinemen.find(p => p.position === 'RG');
-    const lt = sortedLinemen.find(p => p.position === 'LT');
-    const rt = sortedLinemen.find(p => p.position === 'RT');
+    // Find specific linemen positions by their position property
+    const center = linemen.find(p => p.position === 'C');
+    const lg = linemen.find(p => p.position === 'LG');
+    const rg = linemen.find(p => p.position === 'RG');
+    const lt = linemen.find(p => p.position === 'LT');
+    const rt = linemen.find(p => p.position === 'RT');
     
     const centerX = center?.x || 350;
     const lineOfScrimmage = 200;
     const holeY = lineOfScrimmage - 5;
 
-    // Parse hole number from format like "1 (A-Gap Left)"
-    const holeNum = hole.charAt(0);
+    // Parse hole number - extract just the digit
+    const holeMatch = hole.match(/^(\d)/);
+    const holeNum = holeMatch ? holeMatch[1] : hole.charAt(0);
 
     switch (holeNum) {
-      case '0':
-        return { x: rg ? (centerX + rg.x) / 2 : centerX + 20, y: holeY };
-      case '1':
-        return { x: lg ? (centerX + lg.x) / 2 : centerX - 20, y: holeY };
-      case '2':
-        return { x: (lg && lt) ? (lg.x + lt.x) / 2 : centerX - 60, y: holeY };
-      case '3':
-        return { x: (rg && rt) ? (rg.x + rt.x) / 2 : centerX + 60, y: holeY };
-      case '4':
-        return { x: lt ? lt.x - 30 : centerX - 100, y: holeY };
-      case '5':
-        return { x: rt ? rt.x + 30 : centerX + 100, y: holeY };
-      case '6':
+      case '1': // C-LG gap (between Center and Left Guard)
+        if (lg && center) {
+          return { x: (center.x + lg.x) / 2, y: holeY };
+        }
+        return { x: centerX - 20, y: holeY };
+        
+      case '2': // C-RG gap (between Center and Right Guard)
+        if (rg && center) {
+          return { x: (center.x + rg.x) / 2, y: holeY };
+        }
+        return { x: centerX + 20, y: holeY };
+        
+      case '3': // LG-LT gap (between Left Guard and Left Tackle)
+        if (lg && lt) {
+          return { x: (lg.x + lt.x) / 2, y: holeY };
+        }
+        return { x: centerX - 60, y: holeY };
+        
+      case '4': // RG-RT gap (between Right Guard and Right Tackle)
+        if (rg && rt) {
+          return { x: (rg.x + rt.x) / 2, y: holeY };
+        }
+        return { x: centerX + 60, y: holeY };
+        
+      case '5': // Outside LT (left of Left Tackle)
+        if (lt) {
+          return { x: lt.x - 30, y: holeY };
+        }
+        return { x: centerX - 100, y: holeY };
+        
+      case '6': // Outside RT (right of Right Tackle)
+        if (rt) {
+          return { x: rt.x + 30, y: holeY };
+        }
+        return { x: centerX + 100, y: holeY };
+        
+      case '7': // Far left (outside of formation)
         return { x: sortedLinemen[0].x - 60, y: holeY };
-      case '7':
+        
+      case '8': // Far right (outside of formation)
         return { x: sortedLinemen[sortedLinemen.length - 1].x + 60, y: holeY };
-      case '8':
-        return { x: sortedLinemen[0].x - 40, y: holeY };
-      case '9':
-        return { x: sortedLinemen[sortedLinemen.length - 1].x + 40, y: holeY };
+        
       default:
         return { x: centerX, y: holeY };
     }
@@ -1110,13 +1135,16 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                             </div>
                             <div>
                               <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
-                              <input
-                                type="text"
+                              <select
                                 value={player.blockResponsibility || ''}
                                 onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
                                 className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
-                                placeholder="e.g., Nose, 3-tech, Mike LB"
-                              />
+                              >
+                                <option value="">Select...</option>
+                                {BLOCK_RESPONSIBILITIES.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                         </div>
