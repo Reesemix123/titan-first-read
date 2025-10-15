@@ -10,10 +10,22 @@ import {
   OFFENSIVE_ATTRIBUTES,
   DEFENSIVE_ATTRIBUTES,
   SPECIAL_TEAMS_ATTRIBUTES,
+  BLOCKING_ASSIGNMENTS,
+  PASSING_ROUTES,
+  RUNNING_HOLES,
   getAttributeOptions,
   getAssignmentOptions,
-  POSITION_GROUPS
+  POSITION_GROUPS,
+  FORMATION_METADATA
 } from '@/config/footballConfig';
+import {
+  validateOffensiveFormation,
+  validateDefensiveFormation,
+  checkIllegalFormation,
+  checkOffsides,
+  getValidationSummary,
+  type FormationValidation
+} from '@/config/footballRules';
 
 interface Player {
   id: string;
@@ -22,6 +34,10 @@ interface Player {
   label: string;
   position: string;
   side: 'offense' | 'defense';
+  assignment?: string;
+  blockType?: string;
+  blockResponsibility?: string;
+  isPrimary?: boolean;
 }
 
 interface Route {
@@ -29,6 +45,7 @@ interface Route {
   playerId: string;
   points: Array<{ x: number; y: number }>;
   assignment?: string;
+  isPrimary?: boolean;
 }
 
 interface PlayBuilderProps {
@@ -55,28 +72,35 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   
   const [formation, setFormation] = useState(existingPlay?.attributes.formation || '');
   const [playType, setPlayType] = useState(existingPlay?.attributes.playType || '');
-  const [personnel, setPersonnel] = useState(existingPlay?.attributes.personnel || '');
+  const [targetHole, setTargetHole] = useState(existingPlay?.attributes.targetHole || '');
+  const [ballCarrier, setBallCarrier] = useState(existingPlay?.attributes.ballCarrier || '');
+  
   const [coverage, setCoverage] = useState(existingPlay?.attributes.coverage || '');
   const [blitzType, setBlitzType] = useState(existingPlay?.attributes.blitzType || '');
-  const [runConcept, setRunConcept] = useState(existingPlay?.attributes.runConcept || '');
-  const [passConcept, setPassConcept] = useState(existingPlay?.attributes.passConcept || '');
   const [front, setFront] = useState(existingPlay?.attributes.front || '');
   
   const [players, setPlayers] = useState<Player[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
-  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
-  const [isDrawingRoute, setIsDrawingRoute] = useState(false);
-  const [currentRoute, setCurrentRoute] = useState<Array<{ x: number; y: number }>>([]);
   const [draggedPlayer, setDraggedPlayer] = useState<string | null>(null);
   
-  // Assignment modal state
-  const [showAssignmentModal, setShowAssignmentModal] = useState(false);
-  const [pendingRoute, setPendingRoute] = useState<Array<{ x: number; y: number }>>([]);
-  const [pendingPlayerId, setPendingPlayerId] = useState<string | null>(null);
-  const [selectedAssignment, setSelectedAssignment] = useState('');
+  // Drawing custom routes
+  const [isDrawingRoute, setIsDrawingRoute] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+  const [currentRoute, setCurrentRoute] = useState<Array<{ x: number; y: number }>>([]);
+  
+  // Default collapsed sections
+  const [showFormationMetadata, setShowFormationMetadata] = useState(true);
+  const [showLinemenSection, setShowLinemenSection] = useState(false);
+  const [showBacksSection, setShowBacksSection] = useState(false);
+  const [showReceiversSection, setShowReceiversSection] = useState(false);
   
   const svgRef = useRef<SVGSVGElement>(null);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Validation state
+  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [validationResult, setValidationResult] = useState<FormationValidation | null>(null);
+  const [saveAnywayConfirmed, setSaveAnywayConfirmed] = useState(false);
 
   const attributeOptions = getAttributeOptions(odk);
 
@@ -101,7 +125,11 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
         y: p.y,
         label: p.label,
         position: p.position,
-        side: existingPlay.diagram.odk === 'defense' ? 'defense' : 'offense'
+        side: existingPlay.diagram.odk === 'defense' ? 'defense' : 'offense',
+        assignment: p.assignment,
+        blockType: p.blockType,
+        blockResponsibility: p.blockResponsibility,
+        isPrimary: p.isPrimary || false
       })));
       setRoutes(existingPlay.diagram.routes || []);
     }
@@ -152,13 +180,18 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
 
     if (formationData) {
+      const centerX = 350;
+      const formationCenter = formationData.reduce((sum, pos) => sum + pos.x, 0) / formationData.length;
+      const offset = centerX - formationCenter;
+
       const newPlayers: Player[] = formationData.map((pos, idx) => ({
         id: `${odk}-${idx}`,
-        x: pos.x,
+        x: pos.x + offset,
         y: pos.y,
         label: pos.label,
         position: pos.position,
-        side: odk === 'defense' ? 'defense' : 'offense'
+        side: odk === 'defense' ? 'defense' : 'offense',
+        isPrimary: false
       }));
       
       setPlayers(newPlayers);
@@ -166,34 +199,161 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
   };
 
+  // Auto-generate route path based on route type
+  const generateRoutePath = (player: Player, routeType: string): Array<{ x: number; y: number }> => {
+    const startX = player.x;
+    const startY = player.y;
+    const lineOfScrimmage = 200;
+    const isLeftSide = startX < 350;
+
+    // Handle full route names from config (e.g., "Go/Streak/9")
+    const routeName = routeType.split('/')[0];
+
+    switch (routeName) {
+      case 'Go':
+      case 'Streak':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 100 }
+        ];
+      
+      case 'Post':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 50 },
+          { x: 350, y: lineOfScrimmage - 100 }
+        ];
+      
+      case 'Corner':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 50 },
+          { x: isLeftSide ? startX - 60 : startX + 60, y: lineOfScrimmage - 100 }
+        ];
+      
+      case 'Out':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 40 },
+          { x: isLeftSide ? startX - 80 : startX + 80, y: lineOfScrimmage - 40 }
+        ];
+      
+      case 'In':
+      case 'Dig':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 40 },
+          { x: 350, y: lineOfScrimmage - 40 }
+        ];
+      
+      case 'Slant':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 15 },
+          { x: isLeftSide ? startX + 40 : startX - 40, y: lineOfScrimmage - 45 }
+        ];
+      
+      case 'Hitch':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 30 },
+          { x: startX, y: lineOfScrimmage - 25 }
+        ];
+      
+      case 'Flat':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 10 },
+          { x: isLeftSide ? startX - 60 : startX + 60, y: lineOfScrimmage - 15 }
+        ];
+      
+      case 'Wheel':
+        return [
+          { x: startX, y: startY },
+          { x: isLeftSide ? startX - 30 : startX + 30, y: lineOfScrimmage - 10 },
+          { x: isLeftSide ? startX - 50 : startX + 50, y: lineOfScrimmage - 30 },
+          { x: isLeftSide ? startX - 60 : startX + 60, y: lineOfScrimmage - 80 }
+        ];
+
+      case 'Curl':
+      case 'Comeback':
+        return [
+          { x: startX, y: startY },
+          { x: startX, y: lineOfScrimmage - 50 },
+          { x: startX, y: lineOfScrimmage - 45 }
+        ];
+
+      case 'Seam':
+        return [
+          { x: startX, y: startY },
+          { x: startX + (isLeftSide ? 20 : -20), y: lineOfScrimmage - 100 }
+        ];
+
+      case 'Fade':
+        return [
+          { x: startX, y: startY },
+          { x: isLeftSide ? startX - 20 : startX + 20, y: lineOfScrimmage - 80 }
+        ];
+      
+      default:
+        return [{ x: startX, y: startY }];
+    }
+  };
+
+  // Auto-generate routes when assignment changes (except custom draw)
+  useEffect(() => {
+    const newRoutes: Route[] = [];
+    
+    players.forEach(player => {
+      if (player.assignment && player.assignment !== 'Block' && player.assignment !== 'Draw Route (Custom)' && playType === 'Pass') {
+        const routePath = generateRoutePath(player, player.assignment);
+        if (routePath.length > 1) {
+          // Preserve existing isPrimary status from current routes
+          const existingRoute = routes.find(r => r.playerId === player.id);
+          newRoutes.push({
+            id: `route-${player.id}`,
+            playerId: player.id,
+            points: routePath,
+            assignment: player.assignment,
+            isPrimary: existingRoute?.isPrimary || player.isPrimary || false
+          });
+        }
+      }
+    });
+    
+    // Keep manually drawn routes with their isPrimary status preserved
+    const manualRoutes = routes.filter(r => {
+      const player = players.find(p => p.id === r.playerId);
+      return player?.assignment === 'Draw Route (Custom)';
+    });
+    
+    setRoutes([...newRoutes, ...manualRoutes]);
+  }, [players, playType]);
+
   const handleMouseDown = (playerId: string) => {
+    if (isDrawingRoute) return;
     setDraggedPlayer(playerId);
   };
 
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    if (!svgRef.current) return;
+    if (!svgRef.current || !draggedPlayer) return;
 
     const rect = svgRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    if (draggedPlayer) {
-      setPlayers(prev =>
-        prev.map(p =>
-          p.id === draggedPlayer ? { ...p, x, y } : p
-        )
-      );
-    }
-
-    if (isDrawingRoute && currentRoute.length > 0) {
-      setCurrentRoute(prev => [...prev.slice(0, -1), { x, y }]);
-    }
-  }, [draggedPlayer, isDrawingRoute, currentRoute]);
+    setPlayers(prev =>
+      prev.map(p =>
+        p.id === draggedPlayer ? { ...p, x, y } : p
+      )
+    );
+  }, [draggedPlayer]);
 
   const handleMouseUp = () => {
     setDraggedPlayer(null);
   };
 
+  // Click to add point, double-click to finish
   const handleFieldClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current || !isDrawingRoute || !selectedPlayer) return;
 
@@ -204,7 +364,30 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     setCurrentRoute(prev => [...prev, { x, y }]);
   };
 
-  const startRoute = (playerId: string) => {
+  const handleFieldDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!isDrawingRoute || !selectedPlayer || currentRoute.length < 2) return;
+    
+    // Finish the route on double-click
+    const player = players.find(p => p.id === selectedPlayer);
+    const filteredRoutes = routes.filter(r => r.playerId !== selectedPlayer);
+    
+    setRoutes([
+      ...filteredRoutes,
+      {
+        id: `route-${Date.now()}`,
+        playerId: selectedPlayer,
+        points: [...currentRoute],
+        assignment: player?.assignment,
+        isPrimary: player?.isPrimary || false
+      }
+    ]);
+    
+    setIsDrawingRoute(false);
+    setCurrentRoute([]);
+    setSelectedPlayer(null);
+  };
+
+  const startCustomRoute = (playerId: string) => {
     const player = players.find(p => p.id === playerId);
     if (!player) return;
 
@@ -213,68 +396,284 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     setCurrentRoute([{ x: player.x, y: player.y }]);
   };
 
-  const finishRoute = () => {
-    if (currentRoute.length > 1 && selectedPlayer) {
-      setPendingRoute([...currentRoute]);
-      setPendingPlayerId(selectedPlayer);
-      setShowAssignmentModal(true);
+  const cancelCustomRoute = () => {
+    setIsDrawingRoute(false);
+    setCurrentRoute([]);
+    setSelectedPlayer(null);
+  };
+
+  const updatePlayerAssignment = (playerId: string, assignment: string) => {
+    setPlayers(prev =>
+      prev.map(p =>
+        p.id === playerId ? { ...p, assignment } : p
+      )
+    );
+
+    // If switching to custom draw, start drawing
+    if (assignment === 'Draw Route (Custom)') {
+      setTimeout(() => startCustomRoute(playerId), 100);
     } else {
-      cancelRoute();
+      // Remove any manually drawn routes for this player
+      setRoutes(prev => prev.filter(r => r.playerId !== playerId));
     }
   };
 
-  const cancelRoute = () => {
-    setIsDrawingRoute(false);
-    setCurrentRoute([]);
-    setSelectedPlayer(null);
+  const updatePlayerBlockType = (playerId: string, blockType: string) => {
+    setPlayers(prev =>
+      prev.map(p =>
+        p.id === playerId ? { ...p, blockType } : p
+      )
+    );
   };
 
-  const saveRouteWithAssignment = () => {
-    if (!selectedAssignment || !pendingPlayerId) return;
-
-    setRoutes(prev => [
-      ...prev,
-      {
-        id: `route-${Date.now()}`,
-        playerId: pendingPlayerId,
-        points: [...pendingRoute],
-        assignment: selectedAssignment
-      }
-    ]);
-
-    setShowAssignmentModal(false);
-    setPendingRoute([]);
-    setPendingPlayerId(null);
-    setSelectedAssignment('');
-    setIsDrawingRoute(false);
-    setCurrentRoute([]);
-    setSelectedPlayer(null);
+  const updatePlayerBlockResponsibility = (playerId: string, blockResponsibility: string) => {
+    setPlayers(prev =>
+      prev.map(p =>
+        p.id === playerId ? { ...p, blockResponsibility } : p
+      )
+    );
   };
 
-  const deleteRoute = (routeId: string) => {
-    setRoutes(prev => prev.filter(r => r.id !== routeId));
+  const togglePrimaryReceiver = (playerId: string) => {
+    // Update players - only one can be primary
+    setPlayers(prev =>
+      prev.map(p => ({
+        ...p,
+        isPrimary: p.id === playerId ? !p.isPrimary : false
+      }))
+    );
+
+    // Update routes - preserve the primary status
+    setRoutes(prev =>
+      prev.map(r => {
+        if (r.playerId === playerId) {
+          return { ...r, isPrimary: !r.isPrimary };
+        } else {
+          return { ...r, isPrimary: false };
+        }
+      })
+    );
   };
 
-  const getPositionGroup = (position: string): string => {
-    if (POSITION_GROUPS.linemen.includes(position)) return 'Offensive Line';
-    if (POSITION_GROUPS.backs.includes(position)) return 'Backs';
-    if (POSITION_GROUPS.receivers.includes(position) || 
-        position.includes('WR') || 
-        position.includes('TE') ||
-        ['X', 'Y', 'Z', 'SL', 'SR', 'SE', 'FL'].includes(position)) {
-      return 'Receivers';
-    }
-    return 'Other';
-  };
-
-  const getAvailableAssignments = (): string[] => {
-    if (!pendingPlayerId) return [];
+  const getHolePosition = (hole: string): { x: number; y: number } => {
+    const linemen = players.filter(p => getPositionGroup(p.position) === 'linemen');
+    const sortedLinemen = [...linemen].sort((a, b) => a.x - b.x);
     
-    const player = players.find(p => p.id === pendingPlayerId);
-    if (!player) return [];
+    if (sortedLinemen.length < 2) {
+      return { x: 350, y: 195 };
+    }
 
-    const playTypeForAssignment = playType === 'Run' ? 'run' : 'pass';
-    return getAssignmentOptions(player.position, playTypeForAssignment);
+    const center = sortedLinemen.find(p => p.position === 'C');
+    const lg = sortedLinemen.find(p => p.position === 'LG');
+    const rg = sortedLinemen.find(p => p.position === 'RG');
+    const lt = sortedLinemen.find(p => p.position === 'LT');
+    const rt = sortedLinemen.find(p => p.position === 'RT');
+    
+    const centerX = center?.x || 350;
+    const lineOfScrimmage = 200;
+    const holeY = lineOfScrimmage - 5;
+
+    // Parse hole number from format like "1 (A-Gap Left)"
+    const holeNum = hole.charAt(0);
+
+    switch (holeNum) {
+      case '0':
+        return { x: rg ? (centerX + rg.x) / 2 : centerX + 20, y: holeY };
+      case '1':
+        return { x: lg ? (centerX + lg.x) / 2 : centerX - 20, y: holeY };
+      case '2':
+        return { x: (lg && lt) ? (lg.x + lt.x) / 2 : centerX - 60, y: holeY };
+      case '3':
+        return { x: (rg && rt) ? (rg.x + rt.x) / 2 : centerX + 60, y: holeY };
+      case '4':
+        return { x: lt ? lt.x - 30 : centerX - 100, y: holeY };
+      case '5':
+        return { x: rt ? rt.x + 30 : centerX + 100, y: holeY };
+      case '6':
+        return { x: sortedLinemen[0].x - 60, y: holeY };
+      case '7':
+        return { x: sortedLinemen[sortedLinemen.length - 1].x + 60, y: holeY };
+      case '8':
+        return { x: sortedLinemen[0].x - 40, y: holeY };
+      case '9':
+        return { x: sortedLinemen[sortedLinemen.length - 1].x + 40, y: holeY };
+      default:
+        return { x: centerX, y: holeY };
+    }
+  };
+
+  const getBlockingArrowDirection = (player: Player): { endX: number; endY: number } | null => {
+    if (!player.blockType && !player.blockResponsibility) return null;
+
+    const baseLength = 30;
+    let angle = -45;
+
+    if (player.blockType === 'Down') {
+      angle = -60;
+    } else if (player.blockType === 'Reach') {
+      angle = -30;
+    } else if (player.blockType === 'Pull') {
+      const direction = player.blockResponsibility?.includes('Left') ? -1 : 1;
+      return {
+        endX: player.x + (baseLength * 1.5 * direction),
+        endY: player.y
+      };
+    }
+
+    const radians = (angle * Math.PI) / 180;
+    return {
+      endX: player.x + baseLength * Math.cos(radians),
+      endY: player.y + baseLength * Math.sin(radians)
+    };
+  };
+
+  // Red ball carrier arrow (simple, small arrowhead)
+  const renderBallCarrierArrow = (player: Player) => {
+    if (playType !== 'Run' || !targetHole || player.label !== ballCarrier) return null;
+
+    const holePos = getHolePosition(targetHole);
+    const startX = player.x;
+    const startY = player.y;
+    const endX = holePos.x;
+    const endY = holePos.y;
+
+    // Simple path that stays on offensive side
+    let pathD = `M ${startX} ${startY}`;
+    const midY = Math.max(startY, 205);
+    pathD += ` L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
+
+    return (
+      <g key={`ball-carrier-${player.id}`}>
+        <defs>
+          <marker
+            id={`arrowhead-ball-${player.id}`}
+            markerWidth="6"
+            markerHeight="6"
+            refX="5"
+            refY="3"
+            orient="auto"
+          >
+            <path d="M 0 0 L 6 3 L 0 6 z" fill="#FF0000" />
+          </marker>
+        </defs>
+        <path
+          d={pathD}
+          fill="none"
+          stroke="#FF0000"
+          strokeWidth="2.5"
+          markerEnd={`url(#arrowhead-ball-${player.id})`}
+        />
+      </g>
+    );
+  };
+
+  // Gray blocking arrows with T-shape (no arrowhead, just perpendicular line)
+  const renderBlockingArrow = (player: Player) => {
+    if (!player.blockType && !player.blockResponsibility) return null;
+
+    const arrowEnd = getBlockingArrowDirection(player);
+    if (!arrowEnd) return null;
+
+    // Calculate perpendicular line for T-shape
+    const dx = arrowEnd.endX - player.x;
+    const dy = arrowEnd.endY - player.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const perpX = -dy / length * 8;
+    const perpY = dx / length * 8;
+
+    return (
+      <g key={`block-${player.id}`}>
+        {/* Main line */}
+        <line
+          x1={player.x}
+          y1={player.y}
+          x2={arrowEnd.endX}
+          y2={arrowEnd.endY}
+          stroke="#888888"
+          strokeWidth="2"
+        />
+        {/* T-shape perpendicular line at end */}
+        <line
+          x1={arrowEnd.endX - perpX}
+          y1={arrowEnd.endY - perpY}
+          x2={arrowEnd.endX + perpX}
+          y2={arrowEnd.endY + perpY}
+          stroke="#888888"
+          strokeWidth="2"
+        />
+      </g>
+    );
+  };
+
+  // Pass routes with small arrowheads
+  const renderPassRoute = (route: Route) => {
+    const player = players.find(p => p.id === route.playerId);
+    if (!player || route.points.length < 2) return null;
+
+    // Simple connected lines
+    let pathD = `M ${route.points[0].x} ${route.points[0].y}`;
+    for (let i = 1; i < route.points.length; i++) {
+      pathD += ` L ${route.points[i].x} ${route.points[i].y}`;
+    }
+
+    const color = route.isPrimary ? '#FF0000' : '#FFD700';
+
+    return (
+      <g key={route.id}>
+        <defs>
+          <marker
+            id={`arrowhead-route-${route.id}`}
+            markerWidth="6"
+            markerHeight="6"
+            refX="5"
+            refY="3"
+            orient="auto"
+          >
+            <path d="M 0 0 L 6 3 L 0 6 z" fill={color} />
+          </marker>
+        </defs>
+        <path
+          d={pathD}
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          markerEnd={`url(#arrowhead-route-${route.id})`}
+        />
+        {route.assignment && route.assignment !== 'Draw Route (Custom)' && (
+          <text
+            x={route.points[route.points.length - 1].x + 10}
+            y={route.points[route.points.length - 1].y - 6}
+            fontSize="9"
+            fill={color}
+            fontWeight="bold"
+          >
+            {route.assignment.split('/')[0]}
+          </text>
+        )}
+      </g>
+    );
+  };
+
+  const getPositionGroup = (position: string): 'linemen' | 'backs' | 'receivers' => {
+    if (POSITION_GROUPS.linemen.includes(position)) return 'linemen';
+    if (POSITION_GROUPS.backs.includes(position)) return 'backs';
+    return 'receivers';
+  };
+
+  const getAssignmentOptionsForPlayer = (player: Player): string[] => {
+    const group = getPositionGroup(player.position);
+    
+    if (playType === 'Run') {
+      if (group === 'linemen') return [];
+      if (group === 'backs') return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
+      if (group === 'receivers') return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
+    } else if (playType === 'Pass') {
+      if (group === 'linemen') return [];
+      if (group === 'backs') return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
+      if (group === 'receivers') return [...PASSING_ROUTES, 'Draw Route (Custom)'];
+    }
+    
+    return [];
   };
 
   const savePlay = async () => {
@@ -288,21 +687,62 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       return;
     }
 
+    // Validate formation against football rules
+    if (!saveAnywayConfirmed && odk === 'offense') {
+      const validation = validateOffensiveFormation(players);
+      const illegalFormation = checkIllegalFormation(players);
+      const offsidesCheck = checkOffsides(players, 'offense');
+      
+      // Combine all validations
+      const combinedValidation: FormationValidation = {
+        isValid: validation.isValid && illegalFormation.isValid && offsidesCheck.isValid,
+        errors: [...validation.errors, ...illegalFormation.errors, ...offsidesCheck.errors],
+        warnings: [...validation.warnings, ...illegalFormation.warnings, ...offsidesCheck.warnings]
+      };
+      
+      if (!combinedValidation.isValid || combinedValidation.warnings.length > 0) {
+        setValidationResult(combinedValidation);
+        setShowValidationModal(true);
+        return;
+      }
+    } else if (!saveAnywayConfirmed && odk === 'defense') {
+      const validation = validateDefensiveFormation(players);
+      const offsidesCheck = checkOffsides(players, 'defense');
+      
+      const combinedValidation: FormationValidation = {
+        isValid: validation.isValid && offsidesCheck.isValid,
+        errors: [...validation.errors, ...offsidesCheck.errors],
+        warnings: [...validation.warnings, ...offsidesCheck.warnings]
+      };
+      
+      if (!combinedValidation.isValid || combinedValidation.warnings.length > 0) {
+        setValidationResult(combinedValidation);
+        setShowValidationModal(true);
+        return;
+      }
+    }
+
     setIsSaving(true);
+    setSaveAnywayConfirmed(false);
 
     const diagram: PlayDiagram = {
       players: players.map(p => ({
         position: p.position,
         x: p.x,
         y: p.y,
-        label: p.label
+        label: p.label,
+        assignment: p.assignment,
+        blockType: p.blockType,
+        blockResponsibility: p.blockResponsibility,
+        isPrimary: p.isPrimary
       })),
       routes: routes.map(r => ({
         id: r.id,
         playerId: r.playerId,
         path: r.points,
         type: playType === 'Pass' ? 'pass' : 'run',
-        routeType: r.assignment
+        routeType: r.assignment,
+        isPrimary: r.isPrimary
       })),
       formation,
       odk
@@ -312,9 +752,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       odk,
       formation,
       playType: playType || undefined,
-      personnel: personnel || undefined,
-      runConcept: runConcept || undefined,
-      passConcept: passConcept || undefined,
+      targetHole: targetHole || undefined,
+      ballCarrier: ballCarrier || undefined,
       coverage: coverage || undefined,
       blitzType: blitzType || undefined,
       front: front || undefined
@@ -358,10 +797,19 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
   };
 
+  const handleSaveAnyway = () => {
+    setSaveAnywayConfirmed(true);
+    setShowValidationModal(false);
+    // Trigger save again with confirmation flag set
+    setTimeout(() => savePlay(), 100);
+  };
+
   const availableFormations = formationList();
-  const currentPlayer = pendingPlayerId ? players.find(p => p.id === pendingPlayerId) : null;
-  const positionGroup = currentPlayer ? getPositionGroup(currentPlayer.position) : '';
-  const availableAssignments = getAvailableAssignments();
+  const linemen = players.filter(p => getPositionGroup(p.position) === 'linemen');
+  const backs = players.filter(p => getPositionGroup(p.position) === 'backs');
+  const receivers = players.filter(p => getPositionGroup(p.position) === 'receivers');
+  
+  const potentialBallCarriers = players.filter(p => getPositionGroup(p.position) !== 'linemen');
 
   return (
     <div className="space-y-6">
@@ -395,7 +843,7 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block text-sm font-semibold text-gray-800 mb-1">
               Type (ODK) *
@@ -407,6 +855,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 setFormation('');
                 setPlayers([]);
                 setRoutes([]);
+                setPlayType('');
+                setTargetHole('');
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
             >
@@ -434,17 +884,19 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               ))}
             </select>
           </div>
-        </div>
 
-        {odk === 'offense' && (
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          {odk === 'offense' && (
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-1">
-                Play Type
+                Play Type *
               </label>
               <select
                 value={playType}
-                onChange={(e) => setPlayType(e.target.value)}
+                onChange={(e) => {
+                  setPlayType(e.target.value);
+                  setTargetHole('');
+                  setBallCarrier('');
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
               >
                 <option value="">Select...</option>
@@ -453,54 +905,41 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 ))}
               </select>
             </div>
+          )}
+        </div>
 
+        {/* Hole and Ball Carrier for Run Plays */}
+        {odk === 'offense' && playType === 'Run' && (
+          <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-1">
-                Personnel
+                Target Hole *
               </label>
               <select
-                value={personnel}
-                onChange={(e) => setPersonnel(e.target.value)}
+                value={targetHole}
+                onChange={(e) => setTargetHole(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
               >
-                <option value="">Select...</option>
-                {OFFENSIVE_ATTRIBUTES.personnel.map(p => (
-                  <option key={p} value={p}>{p}</option>
+                <option value="">Select hole...</option>
+                {RUNNING_HOLES.map(hole => (
+                  <option key={hole.charAt(0)} value={hole}>{hole}</option>
                 ))}
               </select>
             </div>
             
-            {playType === 'Run' && (
+            {targetHole && (
               <div>
                 <label className="block text-sm font-semibold text-gray-800 mb-1">
-                  Run Concept
+                  Ball Carrier *
                 </label>
                 <select
-                  value={runConcept}
-                  onChange={(e) => setRunConcept(e.target.value)}
+                  value={ballCarrier}
+                  onChange={(e) => setBallCarrier(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                 >
-                  <option value="">Select...</option>
-                  {OFFENSIVE_ATTRIBUTES.runConcepts.map(rc => (
-                    <option key={rc} value={rc}>{rc}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            
-            {playType === 'Pass' && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">
-                  Pass Concept
-                </label>
-                <select
-                  value={passConcept}
-                  onChange={(e) => setPassConcept(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-                >
-                  <option value="">Select...</option>
-                  {OFFENSIVE_ATTRIBUTES.passConcepts.map(pc => (
-                    <option key={pc} value={pc}>{pc}</option>
+                  <option value="">Select ball carrier...</option>
+                  {potentialBallCarriers.map(player => (
+                    <option key={player.id} value={player.label}>{player.label} ({player.position})</option>
                   ))}
                 </select>
               </div>
@@ -508,6 +947,73 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
           </div>
         )}
 
+        {/* Formation Metadata Display */}
+        {formation && odk === 'offense' && FORMATION_METADATA[formation] && (
+          <div className="mb-4 border border-blue-200 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setShowFormationMetadata(!showFormationMetadata)}
+              className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 p-3 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 transition-colors"
+            >
+              <h4 className="font-semibold text-gray-900">Formation Info: {formation}</h4>
+              <svg
+                className={`w-5 h-5 text-gray-600 transition-transform ${showFormationMetadata ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showFormationMetadata && (
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-700 mb-2">
+                      {FORMATION_METADATA[formation].usage}
+                    </p>
+                  </div>
+                  <div className="ml-4 text-right">
+                    <div className="text-xs text-gray-600 mb-1">
+                      {FORMATION_METADATA[formation].personnel}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-semibold">
+                        Run {FORMATION_METADATA[formation].runPercent}%
+                      </span>
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded font-semibold">
+                        Pass {FORMATION_METADATA[formation].passPercent}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="font-semibold text-green-700">✓ Strengths:</span>
+                    <p className="text-gray-700 mt-1">
+                      {FORMATION_METADATA[formation].strengths}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="font-semibold text-red-700">⚠ Weaknesses:</span>
+                    <p className="text-gray-700 mt-1">
+                      {FORMATION_METADATA[formation].weaknesses}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  <span className="text-xs font-semibold text-gray-700">Common Plays: </span>
+                  <span className="text-xs text-gray-600">
+                    {FORMATION_METADATA[formation].commonPlays.join(', ')}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Defense Attributes */}
         {odk === 'defense' && (
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div>
@@ -557,6 +1063,179 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
             </div>
           </div>
         )}
+
+        {/* Position Assignments Section */}
+        {odk === 'offense' && playType && players.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-lg font-bold text-gray-900 border-b pb-2">Player Assignments</h3>
+            
+            {/* Offensive Linemen */}
+            {linemen.length > 0 && (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setShowLinemenSection(!showLinemenSection)}
+                  className="w-full bg-gray-50 p-3 flex items-center justify-between hover:bg-gray-100 transition-colors"
+                >
+                  <h4 className="font-semibold text-gray-900">Offensive Line ({linemen.length})</h4>
+                  <svg
+                    className={`w-5 h-5 text-gray-600 transition-transform ${showLinemenSection ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showLinemenSection && (
+                  <div className="p-4 bg-gray-50">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {linemen.map(player => (
+                        <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
+                          <label className="block text-sm font-bold text-gray-900 mb-2">
+                            {player.label}
+                          </label>
+                          <div className="space-y-2">
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Block Type</label>
+                              <select
+                                value={player.blockType || ''}
+                                onChange={(e) => updatePlayerBlockType(player.id, e.target.value)}
+                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                              >
+                                <option value="">Select...</option>
+                                {BLOCKING_ASSIGNMENTS.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
+                              <input
+                                type="text"
+                                value={player.blockResponsibility || ''}
+                                onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
+                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                placeholder="e.g., Nose, 3-tech, Mike LB"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* QB & Backs */}
+            {backs.length > 0 && (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setShowBacksSection(!showBacksSection)}
+                  className="w-full bg-blue-50 p-3 flex items-center justify-between hover:bg-blue-100 transition-colors"
+                >
+                  <h4 className="font-semibold text-gray-900">QB & Backs ({backs.length})</h4>
+                  <svg
+                    className={`w-5 h-5 text-gray-600 transition-transform ${showBacksSection ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showBacksSection && (
+                  <div className="p-4 bg-blue-50">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {backs.map(player => (
+                        <div key={player.id}>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            {player.label}
+                          </label>
+                          <select
+                            value={player.assignment || ''}
+                            onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
+                          >
+                            <option value="">Select...</option>
+                            {getAssignmentOptionsForPlayer(player).map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
+                            <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                              <input
+                                type="checkbox"
+                                checked={player.isPrimary || false}
+                                onChange={() => togglePrimaryReceiver(player.id)}
+                                className="w-3 h-3 mr-1"
+                              />
+                              Primary (red route)
+                            </label>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Receivers */}
+            {receivers.length > 0 && (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setShowReceiversSection(!showReceiversSection)}
+                  className="w-full bg-green-50 p-3 flex items-center justify-between hover:bg-green-100 transition-colors"
+                >
+                  <h4 className="font-semibold text-gray-900">Receivers ({receivers.length})</h4>
+                  <svg
+                    className={`w-5 h-5 text-gray-600 transition-transform ${showReceiversSection ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showReceiversSection && (
+                  <div className="p-4 bg-green-50">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {receivers.map(player => (
+                        <div key={player.id}>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            {player.label}
+                          </label>
+                          <select
+                            value={player.assignment || ''}
+                            onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
+                          >
+                            <option value="">Select...</option>
+                            {getAssignmentOptionsForPlayer(player).map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
+                            <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                              <input
+                                type="checkbox"
+                                checked={player.isPrimary || false}
+                                onChange={() => togglePrimaryReceiver(player.id)}
+                                className="w-3 h-3 mr-1"
+                              />
+                              Primary (red route)
+                            </label>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Drawing Canvas */}
@@ -565,26 +1244,9 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
         
         <div className="mb-4 p-4 bg-gray-50 rounded-md">
           <p className="text-sm text-gray-700">
-            <strong>Instructions:</strong> Select a formation to load players. 
-            Drag players to reposition. Click a player to start drawing their assignment, 
-            click on the field to add points, then click "Finish Route".
+            <strong>Instructions:</strong> Drag players to reposition. Select assignments from dropdowns - routes auto-generate! Check the box next to a receiver to make them primary (red route). {isDrawingRoute ? '✏️ Custom drawing mode: Click to add points, double-click to finish route.' : 'Select "Draw Route (Custom)" to manually draw.'}
           </p>
         </div>
-
-        {players.length > 0 && (
-          <div className="mb-4 flex flex-wrap gap-2">
-            {players.map(player => (
-              <button
-                key={player.id}
-                onClick={() => startRoute(player.id)}
-                disabled={isDrawingRoute}
-                className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
-              >
-                {player.label}
-              </button>
-            ))}
-          </div>
-        )}
 
         <div className="border-2 border-gray-300 rounded-lg overflow-hidden relative">
           <svg
@@ -595,9 +1257,11 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onClick={handleFieldClick}
+            onDoubleClick={handleFieldDoubleClick}
           >
             <rect width="700" height="400" fill="#2a6e3f" />
             
+            {/* Field markings */}
             {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
               <line
                 key={i}
@@ -611,10 +1275,48 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               />
             ))}
 
+            {/* Hash marks */}
             <line x1="250" y1="0" x2="250" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
             <line x1="450" y1="0" x2="450" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
+            
+            {/* Line of scrimmage */}
             <line x1="0" y1="200" x2="700" y2="200" stroke="white" strokeWidth="3" />
 
+            {/* Draw arrows FIRST */}
+            {players.map(player => renderBallCarrierArrow(player))}
+            {players.map(player => renderBlockingArrow(player))}
+            {routes.map(route => renderPassRoute(route))}
+
+            {/* Current route being drawn */}
+            {currentRoute.length > 1 && (
+              <g>
+                <path
+                  d={(() => {
+                    let path = `M ${currentRoute[0].x} ${currentRoute[0].y}`;
+                    for (let i = 1; i < currentRoute.length; i++) {
+                      path += ` L ${currentRoute[i].x} ${currentRoute[i].y}`;
+                    }
+                    return path;
+                  })()}
+                  fill="none"
+                  stroke="#FF6600"
+                  strokeWidth="2.5"
+                  strokeDasharray="5,5"
+                />
+                {/* Show click points */}
+                {currentRoute.map((point, idx) => (
+                  <circle
+                    key={idx}
+                    cx={point.x}
+                    cy={point.y}
+                    r="3"
+                    fill="#FF6600"
+                  />
+                ))}
+              </g>
+            )}
+
+            {/* Draw players ON TOP */}
             {players.map(player => (
               <g key={player.id}>
                 {player.side === 'defense' ? (
@@ -654,176 +1356,125 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </text>
               </g>
             ))}
-
-            {routes.map((route) => {
-              const player = players.find(p => p.id === route.playerId);
-              if (!player) return null;
-
-              return (
-                <g key={route.id}>
-                  <path
-                    d={(() => {
-                      let path = `M ${player.x} ${player.y}`;
-                      for (let i = 1; i < route.points.length; i++) {
-                        path += ` L ${route.points[i].x} ${route.points[i].y}`;
-                      }
-                      return path;
-                    })()}
-                    fill="none"
-                    stroke="#FFD700"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                  />
-                  
-                  {route.points.length > 1 && (
-                    <>
-                      {(() => {
-                        const lastPoint = route.points[route.points.length - 1];
-                        const secondLast = route.points[route.points.length - 2];
-                        const angle = Math.atan2(
-                          lastPoint.y - secondLast.y,
-                          lastPoint.x - secondLast.x
-                        ) * 180 / Math.PI;
-                        
-                        return (
-                          <polygon
-                            points="-10,-5 0,0 -10,5 -8,0"
-                            fill="#FFD700"
-                            transform={`translate(${lastPoint.x},${lastPoint.y}) rotate(${angle})`}
-                          />
-                        );
-                      })()}
-                      {route.assignment && (
-                        <text
-                          x={route.points[route.points.length - 1].x + 12}
-                          y={route.points[route.points.length - 1].y - 8}
-                          fontSize="10"
-                          fill="white"
-                          fontWeight="bold"
-                          stroke="black"
-                          strokeWidth="0.5"
-                        >
-                          {route.assignment}
-                        </text>
-                      )}
-                    </>
-                  )}
-                </g>
-              );
-            })}
-            
-            {currentRoute.length > 1 && (
-              <path
-                d={(() => {
-                  let path = `M ${currentRoute[0].x} ${currentRoute[0].y}`;
-                  for (let i = 1; i < currentRoute.length; i++) {
-                    path += ` L ${currentRoute[i].x} ${currentRoute[i].y}`;
-                  }
-                  return path;
-                })()}
-                fill="none"
-                stroke="#FF6600"
-                strokeWidth="3"
-                strokeDasharray="5,5"
-                strokeLinecap="round"
-              />
-            )}
           </svg>
           
           {isDrawingRoute && (
-            <div className="absolute top-4 right-4 bg-white p-3 rounded-lg shadow-lg border border-gray-200">
+            <div className="absolute top-4 right-4 bg-white p-3 rounded-lg shadow-lg border-2 border-orange-400">
+              <p className="text-sm font-semibold text-gray-900 mb-2">
+                ✏️ Drawing Custom Route
+              </p>
+              <p className="text-xs text-gray-600 mb-2">
+                Click: Add point • Double-click: Finish
+              </p>
               <button
-                onClick={finishRoute}
-                className="px-4 py-2 bg-green-600 text-white rounded font-semibold hover:bg-green-700 mr-2 transition-colors"
+                onClick={cancelCustomRoute}
+                className="w-full px-3 py-1.5 bg-gray-500 text-white rounded text-sm hover:bg-gray-600 transition-colors"
               >
-                Finish Route
-              </button>
-              <button
-                onClick={cancelRoute}
-                className="px-4 py-2 bg-gray-500 text-white rounded font-semibold hover:bg-gray-600 transition-colors"
-              >
-                Cancel
+                Cancel (Esc)
               </button>
             </div>
           )}
         </div>
-
-        {routes.length > 0 && (
-          <div className="mt-4">
-            <h4 className="font-semibold text-gray-900 mb-2">Assignments:</h4>
-            <div className="space-y-2">
-              {routes.map(route => {
-                const player = players.find(p => p.id === route.playerId);
-                return (
-                  <div key={route.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                    <span className="text-sm text-gray-700">
-                      {player?.label}: {route.assignment || 'No assignment'}
-                    </span>
-                    <button
-                      onClick={() => deleteRoute(route.id)}
-                      className="px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Assignment Modal */}
-      {showAssignmentModal && (
+      {/* Validation Modal */}
+      {showValidationModal && validationResult && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">
-              Assign Route for {currentPlayer?.label}
-            </h3>
-            
-            <p className="text-sm text-gray-600 mb-4">
-              Position Group: <strong>{positionGroup}</strong>
-            </p>
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-start justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900">
+                  Formation Validation
+                </h3>
+                <button
+                  onClick={() => setShowValidationModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
 
-            <div className="mb-6">
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
-                Assignment *
-              </label>
-              <select
-                value={selectedAssignment}
-                onChange={(e) => setSelectedAssignment(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-                autoFocus
-              >
-                <option value="">Select assignment...</option>
-                {availableAssignments.map(assignment => (
-                  <option key={assignment} value={assignment}>
-                    {assignment}
-                  </option>
-                ))}
-              </select>
-            </div>
+              {/* Summary */}
+              <div className={`mb-4 p-4 rounded-lg ${
+                validationResult.isValid 
+                  ? 'bg-yellow-50 border border-yellow-200' 
+                  : 'bg-red-50 border border-red-200'
+              }`}>
+                <p className="font-semibold text-gray-900">
+                  {getValidationSummary(validationResult)}
+                </p>
+              </div>
 
-            <div className="flex space-x-3">
-              <button
-                onClick={() => {
-                  setShowAssignmentModal(false);
-                  setPendingRoute([]);
-                  setPendingPlayerId(null);
-                  setSelectedAssignment('');
-                  cancelRoute();
-                }}
-                className="flex-1 px-4 py-2 border-2 border-gray-300 rounded-md hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveRouteWithAssignment}
-                disabled={!selectedAssignment}
-                className="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-              >
-                Save Assignment
-              </button>
+              {/* Errors */}
+              {validationResult.errors.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="font-semibold text-red-700 mb-2 flex items-center">
+                    <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    Critical Errors (Must Fix)
+                  </h4>
+                  <ul className="space-y-2">
+                    {validationResult.errors.map((error, idx) => (
+                      <li key={idx} className="text-sm text-red-700 bg-red-50 p-3 rounded">
+                        {error}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Warnings */}
+              {validationResult.warnings.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="font-semibold text-yellow-700 mb-2 flex items-center">
+                    <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    Warnings (Review Recommended)
+                  </h4>
+                  <ul className="space-y-2">
+                    {validationResult.warnings.map((warning, idx) => (
+                      <li key={idx} className="text-sm text-yellow-700 bg-yellow-50 p-3 rounded">
+                        {warning}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Educational Note */}
+              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>💡 Coach's Note:</strong> These validations ensure your plays follow official football rules. 
+                  {validationResult.errors.length > 0 
+                    ? ' Critical errors indicate this formation would likely draw a penalty in a real game. Review and adjust player positions, or save anyway if this is intentional for practice/demonstration purposes.'
+                    : ' Warnings are suggestions - you can save if this is intentional for your scheme.'}
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowValidationModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Go Back & Fix
+                </button>
+                
+                <button
+                  onClick={handleSaveAnyway}
+                  className={`px-4 py-2 rounded-lg text-white transition-colors ${
+                    validationResult.errors.length > 0
+                      ? 'bg-orange-600 hover:bg-orange-700'
+                      : 'bg-yellow-600 hover:bg-yellow-700'
+                  }`}
+                >
+                  {validationResult.errors.length > 0 ? 'Save Anyway (Override)' : 'Save Anyway'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
