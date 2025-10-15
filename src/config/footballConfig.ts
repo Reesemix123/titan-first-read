@@ -2,6 +2,7 @@
 // SINGLE SOURCE OF TRUTH for all football-related attributes
 // Used by: PlayBuilder, Film Analysis, Analytics, Reports
 // ALL FORMATIONS VALIDATED AGAINST footballRules.ts
+// Updated with accurate formations based on Throw Deep Publishing research
 
 import { Player } from '@/types/football';
 
@@ -251,7 +252,7 @@ export const PLAY_RESULTS = {
 // ============================================
 
 /**
- * Blocking assignments for offensive linemen
+ * Blocking assignments for offensive linemen (TYPE/SCHEME of block)
  */
 export const BLOCKING_ASSIGNMENTS = [
   'Man',
@@ -267,19 +268,46 @@ export const BLOCKING_ASSIGNMENTS = [
 ] as const;
 
 /**
- * Running holes (gap numbering)
+ * Block responsibilities (WHO to block - defender assignment)
+ */
+export const BLOCK_RESPONSIBILITIES = [
+  'Nose',
+  '1-tech (inside Guard)',
+  '3-tech (outside Guard)',
+  '5-tech (outside Tackle)',
+  'Edge/DE',
+  'Mike LB',
+  'Will LB',
+  'Sam LB',
+  'A-gap',
+  'B-gap',
+  'C-gap',
+  'D-gap',
+  'Second Level'
+] as const;
+
+/**
+ * Running holes (gap numbering system)
+ * CORRECTED: Standard high school hole numbering
+ * Odd = Left side, Even = Right side
+ * 1 = Between Center and Left Guard
+ * 2 = Between Center and Right Guard
+ * 3 = Between Left Guard and Left Tackle
+ * 4 = Between Right Guard and Right Tackle
+ * 5 = Outside Left Tackle
+ * 6 = Outside Right Tackle
+ * 7 = Far left (wide)
+ * 8 = Far right (wide)
  */
 export const RUNNING_HOLES = [
-  '0 (A-Gap Right)',
-  '1 (A-Gap Left)', 
-  '2 (B-Gap Left)',
-  '3 (B-Gap Right)',
-  '4 (C-Gap Left)',
-  '5 (C-Gap Right)',
-  '6 (D-Gap Left)',
-  '7 (D-Gap Right)',
-  '8 (Off Tackle Left)',
-  '9 (Off Tackle Right)'
+  '1 (C-LG gap)',
+  '2 (C-RG gap)',
+  '3 (LG-LT gap)',
+  '4 (RG-RT gap)',
+  '5 (Outside LT)',
+  '6 (Outside RT)',
+  '7 (Far Left)',
+  '8 (Far Right)'
 ] as const;
 
 /**
@@ -304,7 +332,8 @@ export const PASSING_ROUTES = [
   'Deep Cross',
   'Seam',
   'Fade',
-  'Block'
+  'Block',
+  'Draw Route (Custom)'
 ] as const;
 
 /**
@@ -346,6 +375,7 @@ export const POSITION_GROUPS = {
 // ACCURATE OFFENSIVE FORMATIONS
 // Field dimensions: 700x400, Line of scrimmage at y=200
 // ALL OFFENSIVE PLAYERS: y >= 200 (at or behind LOS)
+// UPDATED: Based on Throw Deep Publishing research
 // ============================================
 
 export interface FormationConfig {
@@ -353,137 +383,344 @@ export interface FormationConfig {
 }
 
 export const OFFENSIVE_FORMATIONS: FormationConfig = {
-  // ========== SHOTGUN FORMATIONS ==========
+  // ========== SHOTGUN FORMATIONS (QB 5-7 yards back = y=260) ==========
   
   'Shotgun Spread': [
-    // Offensive Line (7 players on LOS = y=200)
+    // 7 on LOS (y=200)
+    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'LT', x: 220, y: 200, label: 'LT' },
     { position: 'LG', x: 260, y: 200, label: 'LG' },
     { position: 'C', x: 300, y: 200, label: 'C' },
     { position: 'RG', x: 340, y: 200, label: 'RG' },
     { position: 'RT', x: 380, y: 200, label: 'RT' },
     { position: 'TE', x: 420, y: 200, label: 'TE' },
-    { position: 'X', x: 50, y: 200, label: 'X' },
-    // Backfield (4 players behind LOS)
-    { position: 'QB', x: 300, y: 260, label: 'QB' },
-    { position: 'RB', x: 340, y: 260, label: 'RB' },
+    // 4 in backfield (y > 205)
+    { position: 'SL', x: 180, y: 210, label: 'SL' },
     { position: 'Z', x: 550, y: 210, label: 'Z' },
-    { position: 'SL', x: 180, y: 210, label: 'SL' }
+    { position: 'QB', x: 300, y: 260, label: 'QB' },
+    { position: 'RB', x: 340, y: 260, label: 'RB' }
   ],
   
   'Gun Trips Right': [
-    // Offensive Line (7 on LOS)
+    // 7 on LOS
+    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'LT', x: 220, y: 200, label: 'LT' },
     { position: 'LG', x: 260, y: 200, label: 'LG' },
     { position: 'C', x: 300, y: 200, label: 'C' },
     { position: 'RG', x: 340, y: 200, label: 'RG' },
     { position: 'RT', x: 380, y: 200, label: 'RT' },
-    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'Y', x: 460, y: 200, label: 'Y' },
-    // Backfield (4 behind LOS)
-    { position: 'QB', x: 300, y: 260, label: 'QB' },
-    { position: 'RB', x: 260, y: 260, label: 'RB' },
+    // 4 in backfield - 3 receivers bunched right
     { position: 'Z', x: 510, y: 210, label: 'Z' },
-    { position: 'SL', x: 420, y: 215, label: 'SL' }
+    { position: 'SL', x: 420, y: 215, label: 'SL' },
+    { position: 'QB', x: 300, y: 260, label: 'QB' },
+    { position: 'RB', x: 260, y: 260, label: 'RB' }
   ],
   
   'Gun Trips Left': [
-    // Offensive Line (7 on LOS)
+    // 7 on LOS
     { position: 'LT', x: 220, y: 200, label: 'LT' },
     { position: 'LG', x: 260, y: 200, label: 'LG' },
     { position: 'C', x: 300, y: 200, label: 'C' },
     { position: 'RG', x: 340, y: 200, label: 'RG' },
     { position: 'RT', x: 380, y: 200, label: 'RT' },
-    { position: 'Z', x: 550, y: 200, label: 'Z' },
     { position: 'Y', x: 140, y: 200, label: 'Y' },
-    // Backfield (4 behind LOS)
-    { position: 'QB', x: 300, y: 260, label: 'QB' },
-    { position: 'RB', x: 340, y: 260, label: 'RB' },
+    { position: 'Z', x: 550, y: 200, label: 'Z' },
+    // 4 in backfield - 3 receivers bunched left
     { position: 'X', x: 90, y: 210, label: 'X' },
-    { position: 'SL', x: 180, y: 215, label: 'SL' }
+    { position: 'SL', x: 180, y: 215, label: 'SL' },
+    { position: 'QB', x: 300, y: 260, label: 'QB' },
+    { position: 'RB', x: 340, y: 260, label: 'RB' }
   ],
   
   'Gun Empty': [
-    // Offensive Line (5 on LOS)
+    // 7 on LOS (5 receivers spread)
+    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'LT', x: 220, y: 200, label: 'LT' },
     { position: 'LG', x: 260, y: 200, label: 'LG' },
     { position: 'C', x: 300, y: 200, label: 'C' },
     { position: 'RG', x: 340, y: 200, label: 'RG' },
     { position: 'RT', x: 380, y: 200, label: 'RT' },
-    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'Z', x: 550, y: 200, label: 'Z' },
-    // Backfield (4 behind - all receivers spread)
-    { position: 'QB', x: 300, y: 260, label: 'QB' },
+    // 4 in backfield (all receivers, empty backfield)
     { position: 'Y', x: 180, y: 210, label: 'Y' },
     { position: 'SL', x: 420, y: 210, label: 'SL' },
+    { position: 'RB', x: 280, y: 225, label: 'RB' },
+    { position: 'QB', x: 320, y: 260, label: 'QB' }
+  ],
+  
+  'Gun Doubles': [
+    // 7 on LOS - Balanced 2x2 receiver sets
+    { position: 'X', x: 50, y: 200, label: 'X' },
+    { position: 'LT', x: 220, y: 200, label: 'LT' },
+    { position: 'LG', x: 260, y: 200, label: 'LG' },
+    { position: 'C', x: 300, y: 200, label: 'C' },
+    { position: 'RG', x: 340, y: 200, label: 'RG' },
+    { position: 'RT', x: 380, y: 200, label: 'RT' },
+    { position: 'Z', x: 550, y: 200, label: 'Z' },
+    // 4 in backfield - 2 slots, QB, RB
+    { position: 'SL', x: 150, y: 210, label: 'SL' },
+    { position: 'SR', x: 450, y: 210, label: 'SR' },
+    { position: 'QB', x: 300, y: 260, label: 'QB' },
     { position: 'RB', x: 300, y: 230, label: 'RB' }
   ],
   
-  // ========== UNDER CENTER FORMATIONS ==========
+  // ========== UNDER CENTER FORMATIONS (QB at y=215) ==========
   
   'I-Formation': [
-    // Offensive Line (7 on LOS)
+    // 7 on LOS
+    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'LT', x: 220, y: 200, label: 'LT' },
     { position: 'LG', x: 260, y: 200, label: 'LG' },
     { position: 'C', x: 300, y: 200, label: 'C' },
     { position: 'RG', x: 340, y: 200, label: 'RG' },
     { position: 'RT', x: 380, y: 200, label: 'RT' },
     { position: 'TE', x: 420, y: 200, label: 'TE' },
-    { position: 'X', x: 50, y: 200, label: 'X' },
-    // Backfield (4 behind)
+    // 4 in backfield - Vertical "I" alignment
     { position: 'QB', x: 300, y: 215, label: 'QB' },
     { position: 'FB', x: 300, y: 245, label: 'FB' },
-    { position: 'RB', x: 300, y: 280, label: 'RB' },
+    { position: 'TB', x: 300, y: 280, label: 'TB' },
     { position: 'Z', x: 550, y: 210, label: 'Z' }
   ],
   
-  'Singleback': [
-    // Offensive Line (7 on LOS)
-    { position: 'LT', x: 220, y: 200, label: 'LT' },
-    { position: 'LG', x: 260, y: 200, label: 'LG' },
-    { position: 'C', x: 300, y: 200, label: 'C' },
-    { position: 'RG', x: 340, y: 200, label: 'RG' },
-    { position: 'RT', x: 380, y: 200, label: 'RT' },
-    { position: 'TE', x: 420, y: 200, label: 'TE' },
-    { position: 'X', x: 50, y: 200, label: 'X' },
-    // Backfield (4 behind)
-    { position: 'QB', x: 300, y: 215, label: 'QB' },
-    { position: 'RB', x: 300, y: 255, label: 'RB' },
-    { position: 'Z', x: 550, y: 210, label: 'Z' },
-    { position: 'SL', x: 180, y: 210, label: 'SL' }
-  ],
-  
   'Pro Set': [
-    // Offensive Line (7 on LOS)
+    // 7 on LOS
+    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'LT', x: 220, y: 200, label: 'LT' },
     { position: 'LG', x: 260, y: 200, label: 'LG' },
     { position: 'C', x: 300, y: 200, label: 'C' },
     { position: 'RG', x: 340, y: 200, label: 'RG' },
     { position: 'RT', x: 380, y: 200, label: 'RT' },
     { position: 'TE', x: 420, y: 200, label: 'TE' },
-    { position: 'X', x: 50, y: 200, label: 'X' },
-    // Backfield (4 behind)
+    // 4 in backfield - Split backs (side-by-side)
     { position: 'QB', x: 300, y: 215, label: 'QB' },
     { position: 'FB', x: 270, y: 245, label: 'FB' },
     { position: 'RB', x: 330, y: 245, label: 'RB' },
     { position: 'Z', x: 550, y: 210, label: 'Z' }
   ],
   
-  'Wing-T': [
-    // Offensive Line (7 on LOS)
+  'Singleback': [
+    // 7 on LOS
+    { position: 'X', x: 50, y: 200, label: 'X' },
     { position: 'LT', x: 220, y: 200, label: 'LT' },
     { position: 'LG', x: 260, y: 200, label: 'LG' },
     { position: 'C', x: 300, y: 200, label: 'C' },
     { position: 'RG', x: 340, y: 200, label: 'RG' },
     { position: 'RT', x: 380, y: 200, label: 'RT' },
     { position: 'TE', x: 420, y: 200, label: 'TE' },
+    // 4 in backfield - Single RB
+    { position: 'QB', x: 300, y: 215, label: 'QB' },
+    { position: 'RB', x: 300, y: 255, label: 'RB' },
+    { position: 'SL', x: 180, y: 210, label: 'SL' },
+    { position: 'Z', x: 550, y: 210, label: 'Z' }
+  ],
+  
+  'Wing-T': [
+    // 7 on LOS - Classic 100/900 formation
     { position: 'SE', x: 50, y: 200, label: 'SE' },
-    // Backfield (4 behind)
+    { position: 'LT', x: 220, y: 200, label: 'LT' },
+    { position: 'LG', x: 260, y: 200, label: 'LG' },
+    { position: 'C', x: 300, y: 200, label: 'C' },
+    { position: 'RG', x: 340, y: 200, label: 'RG' },
+    { position: 'RT', x: 380, y: 200, label: 'RT' },
+    { position: 'TE', x: 420, y: 200, label: 'TE' },
+    // 4 in backfield - Wingback just off LOS outside TE
     { position: 'QB', x: 300, y: 215, label: 'QB' },
     { position: 'FB', x: 300, y: 245, label: 'FB' },
     { position: 'TB', x: 300, y: 280, label: 'TB' },
-    { position: 'WB', x: 410, y: 210, label: 'WB' }
+    { position: 'WB', x: 460, y: 210, label: 'WB' }
+  ],
+  
+  'Power I': [
+    // 7 on LOS - Double TE for power running
+    { position: 'LT', x: 200, y: 200, label: 'LT' },
+    { position: 'LG', x: 260, y: 200, label: 'LG' },
+    { position: 'C', x: 300, y: 200, label: 'C' },
+    { position: 'RG', x: 340, y: 200, label: 'RG' },
+    { position: 'RT', x: 380, y: 200, label: 'RT' },
+    { position: 'TE1', x: 140, y: 200, label: 'TE1' },
+    { position: 'TE2', x: 440, y: 200, label: 'TE2' },
+    // 4 in backfield - I formation
+    { position: 'QB', x: 300, y: 215, label: 'QB' },
+    { position: 'FB', x: 300, y: 245, label: 'FB' },
+    { position: 'TB', x: 300, y: 280, label: 'TB' },
+    { position: 'FL', x: 50, y: 210, label: 'FL' }
+  ],
+  
+  // ========== SPECIALTY FORMATIONS ==========
+  
+  'Wishbone': [
+    // 7 on LOS - Triple option formation
+    { position: 'LT', x: 220, y: 200, label: 'LT' },
+    { position: 'LG', x: 260, y: 200, label: 'LG' },
+    { position: 'C', x: 300, y: 200, label: 'C' },
+    { position: 'RG', x: 340, y: 200, label: 'RG' },
+    { position: 'RT', x: 380, y: 200, label: 'RT' },
+    { position: 'TE1', x: 160, y: 200, label: 'TE1' },
+    { position: 'TE2', x: 440, y: 200, label: 'TE2' },
+    // 4 in backfield - Wishbone shape
+    { position: 'QB', x: 300, y: 215, label: 'QB' },
+    { position: 'FB', x: 300, y: 245, label: 'FB' },
+    { position: 'HB1', x: 260, y: 275, label: 'HB1' },
+    { position: 'HB2', x: 340, y: 275, label: 'HB2' }
+  ],
+  
+  'Flexbone': [
+    // 7 on LOS - Modern option formation
+    { position: 'X', x: 50, y: 200, label: 'X' },
+    { position: 'LT', x: 220, y: 200, label: 'LT' },
+    { position: 'LG', x: 260, y: 200, label: 'LG' },
+    { position: 'C', x: 300, y: 200, label: 'C' },
+    { position: 'RG', x: 340, y: 200, label: 'RG' },
+    { position: 'RT', x: 380, y: 200, label: 'RT' },
+    { position: 'Z', x: 550, y: 200, label: 'Z' },
+    // 4 in backfield - A-backs closer to line
+    { position: 'QB', x: 300, y: 215, label: 'QB' },
+    { position: 'FB', x: 300, y: 245, label: 'FB' },
+    { position: 'AB1', x: 200, y: 220, label: 'AB1' },
+    { position: 'AB2', x: 400, y: 220, label: 'AB2' }
+  ],
+  
+  'Pistol': [
+    // 7 on LOS - QB 3-4 yards back (between shotgun and under center)
+    { position: 'X', x: 50, y: 200, label: 'X' },
+    { position: 'LT', x: 220, y: 200, label: 'LT' },
+    { position: 'LG', x: 260, y: 200, label: 'LG' },
+    { position: 'C', x: 300, y: 200, label: 'C' },
+    { position: 'RG', x: 340, y: 200, label: 'RG' },
+    { position: 'RT', x: 380, y: 200, label: 'RT' },
+    { position: 'TE', x: 420, y: 200, label: 'TE' },
+    // 4 in backfield - QB at 230, RB directly behind
+    { position: 'SL', x: 180, y: 210, label: 'SL' },
+    { position: 'Z', x: 550, y: 210, label: 'Z' },
+    { position: 'QB', x: 300, y: 230, label: 'QB' },
+    { position: 'RB', x: 300, y: 260, label: 'RB' }
   ]
+};
+
+// ============================================
+// FORMATION METADATA FOR COACHES
+// Provides usage guidance and stats
+// ============================================
+
+export const FORMATION_METADATA = {
+  'Shotgun Spread': {
+    usage: 'Modern base formation, balanced pass/run',
+    runPercent: 40,
+    passPercent: 60,
+    personnel: '11 personnel (1RB, 1TE, 3WR)',
+    strengths: 'QB can see defense, multiple passing options, good run lanes',
+    weaknesses: 'Less power running, longer snap',
+    commonPlays: ['Inside Zone', 'RPO', 'Mesh', 'Four Verticals']
+  },
+  'Gun Trips Right': {
+    usage: 'Pass-heavy, overload one side',
+    runPercent: 30,
+    passPercent: 70,
+    personnel: '11 personnel',
+    strengths: 'Forces defense to shift coverage, creates 1-on-1 matchups',
+    weaknesses: 'Predictable run direction, exposes backside',
+    commonPlays: ['Flood', 'Levels', 'Outside Zone to weak side']
+  },
+  'Gun Trips Left': {
+    usage: 'Mirror of Trips Right',
+    runPercent: 30,
+    passPercent: 70,
+    personnel: '11 personnel',
+    strengths: 'Forces defense to shift coverage, creates 1-on-1 matchups',
+    weaknesses: 'Predictable run direction, exposes backside',
+    commonPlays: ['Flood', 'Levels', 'Outside Zone to weak side']
+  },
+  'Gun Empty': {
+    usage: 'Pure passing formation, spreads defense',
+    runPercent: 10,
+    passPercent: 90,
+    personnel: '10 personnel (1RB, 0TE, 4WR)',
+    strengths: 'Maximum passing options, identifies coverage pre-snap',
+    weaknesses: 'No pass protection help, difficult to run',
+    commonPlays: ['Hot routes', 'Quick game', 'QB draw']
+  },
+  'Gun Doubles': {
+    usage: 'Balanced 2x2 receiver sets',
+    runPercent: 45,
+    passPercent: 55,
+    personnel: '11 personnel',
+    strengths: 'Balanced attack, good vs all coverages, versatile',
+    weaknesses: 'No clear strength side',
+    commonPlays: ['Inside Zone', 'Power Read', 'Spacing']
+  },
+  'I-Formation': {
+    usage: 'Power running, lead blocker',
+    runPercent: 70,
+    passPercent: 30,
+    personnel: '21 personnel (2RB, 1TE, 2WR)',
+    strengths: 'Strong inside run game, play action passes, lead blocker',
+    weaknesses: 'Predictable, limited passing options',
+    commonPlays: ['Power', 'Iso', 'Counter', 'Play Action Boot']
+  },
+  'Pro Set': {
+    usage: 'Balanced traditional formation',
+    runPercent: 55,
+    passPercent: 45,
+    personnel: '21 personnel',
+    strengths: 'Can run or pass equally, keeps defense honest',
+    weaknesses: 'No clear advantage, less common in modern football',
+    commonPlays: ['Inside Zone', 'Outside Zone', 'Play Action']
+  },
+  'Singleback': {
+    usage: 'Modern balanced attack',
+    runPercent: 50,
+    passPercent: 50,
+    personnel: '11 personnel',
+    strengths: 'Versatile, can attack anywhere, popular at all levels',
+    weaknesses: 'Requires good all-around talent',
+    commonPlays: ['Inside Zone', 'Power', 'Drive', 'Smash']
+  },
+  'Wing-T': {
+    usage: 'Misdirection, power running',
+    runPercent: 75,
+    passPercent: 25,
+    personnel: '21 personnel',
+    strengths: 'Excellent misdirection, pulls defense out of position',
+    weaknesses: 'Limited deep passing, complex for youth, timing critical',
+    commonPlays: ['Buck Sweep', 'Trap', 'Counter', 'Waggle']
+  },
+  'Power I': {
+    usage: 'Goal line, short yardage',
+    runPercent: 85,
+    passPercent: 15,
+    personnel: '22 personnel (2RB, 2TE, 1WR)',
+    strengths: 'Maximum blocking, dominant at point of attack',
+    weaknesses: 'Very predictable, limited in open field',
+    commonPlays: ['Power', 'Iso', 'QB Sneak', 'Play Action Boot']
+  },
+  'Wishbone': {
+    usage: 'Triple option, high school specialty',
+    runPercent: 90,
+    passPercent: 10,
+    personnel: '30 personnel (3RB, 0TE, 2WR)',
+    strengths: 'Multiple run threats, confuses defense assignments',
+    weaknesses: 'Rare in modern football, limited passing threat',
+    commonPlays: ['Veer', 'Midline', 'Counter Option', 'Dive']
+  },
+  'Flexbone': {
+    usage: 'Modern option attack',
+    runPercent: 80,
+    passPercent: 20,
+    personnel: '21 personnel',
+    strengths: 'Spread option principles, A-backs create mismatches',
+    weaknesses: 'Requires mobile QB, complex reads, timing critical',
+    commonPlays: ['Triple Option', 'Rocket Sweep', 'Load Option', 'Midline']
+  },
+  'Pistol': {
+    usage: 'Hybrid shotgun/under center',
+    runPercent: 55,
+    passPercent: 45,
+    personnel: '11 or 21 personnel',
+    strengths: 'QB closer for handoffs, good read option, versatile',
+    weaknesses: 'Jack of all trades, master of none',
+    commonPlays: ['Power Read', 'Inside Zone', 'Counter', 'Boot']
+  }
 };
 
 // ============================================
@@ -611,7 +848,7 @@ export const SPECIAL_TEAMS_FORMATIONS: FormationConfig = {
     // Rushers
     { position: 'VL', x: 250, y: 190, label: 'VL' },
     { position: 'VR', x: 350, y: 190, label: 'VR' },
-    // Jammers (on gunners) - FIXED: was y=200, now y=195
+    // Jammers (on gunners)
     { position: 'JL', x: 100, y: 195, label: 'JL' },
     { position: 'JR', x: 500, y: 195, label: 'JR' },
     // Punt returner
@@ -750,6 +987,7 @@ export const FOOTBALL_CONFIG = {
   results: PLAY_RESULTS,
   routes: {
     blockingAssignments: BLOCKING_ASSIGNMENTS,
+    blockResponsibilities: BLOCK_RESPONSIBILITIES,
     runningHoles: RUNNING_HOLES,
     passingRoutes: PASSING_ROUTES,
     rbAssignments: RB_ASSIGNMENTS
@@ -759,6 +997,7 @@ export const FOOTBALL_CONFIG = {
     defensive: DEFENSIVE_FORMATIONS,
     specialTeams: SPECIAL_TEAMS_FORMATIONS
   },
+  formationMetadata: FORMATION_METADATA,
   positionGroups: POSITION_GROUPS,
   helpers: {
     getAttributeOptions,
