@@ -39,7 +39,7 @@ export default function PlaybookPage() {
   const [plays, setPlays] = useState<Play[]>([]);
   const [filteredPlays, setFilteredPlays] = useState<Play[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'list' | 'builder'>('list');
+  const [showBuilder, setShowBuilder] = useState(false);
   const [editingPlay, setEditingPlay] = useState<Play | null>(null);
   
   // Filters
@@ -179,16 +179,16 @@ export default function PlaybookPage() {
 
   function handleEditPlay(play: Play) {
     setEditingPlay(play);
-    setView('builder');
+    setShowBuilder(true);
   }
 
   function handleNewPlay() {
     setEditingPlay(null);
-    setView('builder');
+    setShowBuilder(true);
   }
 
-  function handleBackToList() {
-    setView('list');
+  function handleBackToPlaybook() {
+    setShowBuilder(false);
     setEditingPlay(null);
     fetchPlays();
   }
@@ -197,11 +197,14 @@ export default function PlaybookPage() {
     new Set(plays.map(p => p.attributes?.formation).filter(Boolean))
   ).sort();
 
+  const selectedTeam = teams.find(t => t.id === selectedTeamId);
+  const teamName = selectedTeamId === 'personal' ? 'Personal Playbook' : selectedTeam?.name;
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
           <p className="text-gray-600">Loading...</p>
         </div>
       </div>
@@ -210,13 +213,13 @@ export default function PlaybookPage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">Authentication Required</h1>
-          <p className="text-gray-600 mb-4">Please sign in to access the playbook.</p>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto px-6">
+          <h1 className="text-3xl font-semibold text-gray-900 mb-3">Sign in required</h1>
+          <p className="text-gray-600 mb-8">Access your playbook and manage your plays.</p>
           <a 
             href="/auth/login"
-            className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            className="inline-block px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
           >
             Sign In
           </a>
@@ -225,223 +228,235 @@ export default function PlaybookPage() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto py-8 px-4">
-        {view === 'list' ? (
-          <>
-            <div className="text-center mb-8">
-              <h1 className="text-4xl font-bold text-gray-900 mb-4">Playbook Manager</h1>
-              <p className="text-xl text-gray-600">View, edit, and organize your plays</p>
-            </div>
+  // PLAY BUILDER VIEW
+  if (showBuilder) {
+    return (
+      <div className="min-h-screen bg-white">
+        <div className="max-w-7xl mx-auto py-6 px-4">
+          {/* Back Button */}
+          <button
+            onClick={handleBackToPlaybook}
+            className="mb-6 px-4 py-2 text-gray-700 hover:text-black font-medium flex items-center space-x-2 transition-colors"
+          >
+            <span>←</span>
+            <span>Back to Playbook</span>
+          </button>
+          
+          <PlayBuilder 
+            teamId={selectedTeamId || 'personal'} 
+            teamName={teamName}
+            existingPlay={editingPlay}
+            onSave={handleBackToPlaybook}
+          />
+        </div>
+      </div>
+    );
+  }
 
-            {/* Team Selection */}
-            <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Select Team</h2>
-                  <p className="text-sm text-gray-600">Choose a team to view its playbook</p>
-                </div>
-                <div className="w-64">
-                  <select
-                    value={selectedTeamId}
-                    onChange={(e) => setSelectedTeamId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-gray-900"
-                  >
-                    <option value="">Select a team...</option>
-                    <option value="personal">Personal Playbook</option>
-                    {teams.map(team => (
-                      <option key={team.id} value={team.id}>
-                        {team.name} ({team.level})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+  // PLAYBOOK VIEW
+  return (
+    <div className="min-h-screen bg-white">
+      <div className="max-w-7xl mx-auto py-12 px-4">
+        
+        {/* Header */}
+        <div className="text-center mb-12">
+          <h1 className="text-5xl font-semibold text-gray-900 mb-3">Playbook</h1>
+          <p className="text-xl text-gray-600">Your plays, organized.</p>
+        </div>
+
+        {/* Team Selection */}
+        {!selectedTeamId ? (
+          <div className="max-w-2xl mx-auto">
+            <div className="bg-gray-50 rounded-2xl p-12 text-center">
+              <h2 className="text-2xl font-semibold text-gray-900 mb-3">Select a team</h2>
+              <p className="text-gray-600 mb-8">Choose which playbook you'd like to view.</p>
+              
+              <select
+                value={selectedTeamId}
+                onChange={(e) => setSelectedTeamId(e.target.value)}
+                className="w-full max-w-md mx-auto px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black bg-white text-gray-900 text-lg"
+              >
+                <option value="">Choose team...</option>
+                <option value="personal">Personal Playbook</option>
+                {teams.map(team => (
+                  <option key={team.id} value={team.id}>
+                    {team.name} ({team.level})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Team Header with Create Button */}
+            <div className="flex items-center justify-between mb-8 pb-6 border-b border-gray-200">
+              <div>
+                <h2 className="text-3xl font-semibold text-gray-900">{teamName}</h2>
+                <p className="text-gray-600 mt-1">{plays.length} plays</p>
+              </div>
+              
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setSelectedTeamId('')}
+                  className="px-4 py-2 text-gray-700 hover:text-black font-medium transition-colors"
+                >
+                  Change Team
+                </button>
+                <button
+                  onClick={handleNewPlay}
+                  className="px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+                >
+                  + New Play
+                </button>
               </div>
             </div>
 
-            {selectedTeamId && (
-              <>
-                {/* Filters and Actions */}
-                <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
-                      <input
-                        type="text"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        placeholder="Search plays..."
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-gray-900"
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">ODK</label>
-                      <select
-                        value={filterODK}
-                        onChange={(e) => setFilterODK(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-gray-900"
-                      >
-                        <option value="all">All</option>
-                        <option value="offense">Offense</option>
-                        <option value="defense">Defense</option>
-                        <option value="specialTeams">Special Teams</option>
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Formation</label>
-                      <select
-                        value={filterFormation}
-                        onChange={(e) => setFilterFormation(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-gray-900"
-                      >
-                        <option value="all">All Formations</option>
-                        {uniqueFormations.map(formation => (
-                          <option key={formation} value={formation}>
-                            {formation}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex items-end">
-                      <button
-                        onClick={handleNewPlay}
-                        className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
-                      >
-                        Create New Play
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-sm text-gray-600">
-                    <span>Showing {filteredPlays.length} of {plays.length} plays</span>
-                    {(searchTerm || filterODK !== 'all' || filterFormation !== 'all') && (
-                      <button
-                        onClick={() => {
-                          setSearchTerm('');
-                          setFilterODK('all');
-                          setFilterFormation('all');
-                        }}
-                        className="text-indigo-600 hover:text-indigo-800"
-                      >
-                        Clear Filters
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Plays Grid */}
-                {filteredPlays.length === 0 ? (
-                  <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-                    <p className="text-gray-600 text-lg mb-4">
-                      {plays.length === 0 
-                        ? 'No plays yet. Create your first play!'
-                        : 'No plays match your filters.'
-                      }
-                    </p>
-                    {plays.length === 0 && (
-                      <button
-                        onClick={handleNewPlay}
-                        className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                      >
-                        Create First Play
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredPlays.map(play => (
-                      <div key={play.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow">
-                        <div className="p-4 border-b border-gray-200">
-                          <div className="flex items-start justify-between mb-2">
-                            <div>
-                              <h3 className="text-lg font-bold text-gray-900">{play.play_code}</h3>
-                              <p className="text-sm text-gray-600">{play.play_name}</p>
-                            </div>
-                            <span className={`px-2 py-1 text-xs font-medium rounded ${
-                              play.attributes?.odk === 'offense' ? 'bg-blue-100 text-blue-800' :
-                              play.attributes?.odk === 'defense' ? 'bg-red-100 text-red-800' :
-                              'bg-green-100 text-green-800'
-                            }`}>
-                              {play.attributes?.odk === 'offense' ? 'OFF' :
-                               play.attributes?.odk === 'defense' ? 'DEF' : 'ST'}
-                            </span>
-                          </div>
-                          
-                          <div className="space-y-1 text-sm text-gray-600">
-                            <p><span className="font-medium">Formation:</span> {play.attributes?.formation || 'N/A'}</p>
-                            {play.attributes?.playType && (
-                              <p><span className="font-medium">Type:</span> {play.attributes.playType}</p>
-                            )}
-                            {play.attributes?.coverage && (
-                              <p><span className="font-medium">Coverage:</span> {play.attributes.coverage}</p>
-                            )}
-                            {play.attributes?.unit && (
-                              <p><span className="font-medium">Unit:</span> {play.attributes.unit}</p>
-                            )}
-                          </div>
-
-                          {play.comments && (
-                            <p className="mt-2 text-xs text-gray-500 italic line-clamp-2">{play.comments}</p>
-                          )}
-                        </div>
-
-                        <div className="p-4 bg-gray-50 flex items-center justify-between">
-                          <button
-                            onClick={() => handleEditPlay(play)}
-                            className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 transition-colors"
-                          >
-                            Edit
-                          </button>
-                          
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => handleArchivePlay(play.id)}
-                              className="px-3 py-1.5 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition-colors"
-                            >
-                              Archive
-                            </button>
-                            <button
-                              onClick={() => handleDeletePlay(play.id)}
-                              className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+            {/* Filters */}
+            {plays.length > 0 && (
+              <div className="mb-8 flex items-center space-x-4">
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search plays..."
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black bg-white text-gray-900"
+                />
+                
+                <select
+                  value={filterODK}
+                  onChange={(e) => setFilterODK(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black bg-white text-gray-900"
+                >
+                  <option value="all">All Types</option>
+                  <option value="offense">Offense</option>
+                  <option value="defense">Defense</option>
+                  <option value="specialTeams">Special Teams</option>
+                </select>
+                
+                {uniqueFormations.length > 0 && (
+                  <select
+                    value={filterFormation}
+                    onChange={(e) => setFilterFormation(e.target.value)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black bg-white text-gray-900"
+                  >
+                    <option value="all">All Formations</option>
+                    {uniqueFormations.map(formation => (
+                      <option key={formation} value={formation}>
+                        {formation}
+                      </option>
                     ))}
-                  </div>
+                  </select>
                 )}
-              </>
+
+                {(searchTerm || filterODK !== 'all' || filterFormation !== 'all') && (
+                  <button
+                    onClick={() => {
+                      setSearchTerm('');
+                      setFilterODK('all');
+                      setFilterFormation('all');
+                    }}
+                    className="px-4 py-2 text-gray-700 hover:text-black font-medium transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Empty State */}
+            {plays.length === 0 ? (
+              <div className="text-center py-20">
+                <div className="max-w-md mx-auto">
+                  <p className="text-2xl font-semibold text-gray-900 mb-3">No plays yet</p>
+                  <p className="text-gray-600 mb-8">Create your first play to get started.</p>
+                  <button
+                    onClick={handleNewPlay}
+                    className="px-8 py-4 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium text-lg"
+                  >
+                    Create First Play
+                  </button>
+                </div>
+              </div>
+            ) : filteredPlays.length === 0 ? (
+              <div className="text-center py-20">
+                <p className="text-xl text-gray-600">No plays match your filters.</p>
+              </div>
+            ) : (
+              /* Plays Grid */
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredPlays.map(play => (
+                  <div 
+                    key={play.id} 
+                    className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:border-gray-400 transition-all cursor-pointer"
+                    onClick={() => handleEditPlay(play)}
+                  >
+                    {/* Play Header */}
+                    <div className="p-6 border-b border-gray-100">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <h3 className="text-sm font-medium text-gray-500">{play.play_code}</h3>
+                          <p className="text-xl font-semibold text-gray-900 mt-1">{play.play_name}</p>
+                        </div>
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          play.attributes?.odk === 'offense' ? 'bg-blue-50 text-blue-700' :
+                          play.attributes?.odk === 'defense' ? 'bg-red-50 text-red-700' :
+                          'bg-green-50 text-green-700'
+                        }`}>
+                          {play.attributes?.odk === 'offense' ? 'OFF' :
+                           play.attributes?.odk === 'defense' ? 'DEF' : 'ST'}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-1 text-sm text-gray-600">
+                        <p>{play.attributes?.formation || 'No formation'}</p>
+                        {play.attributes?.playType && (
+                          <p>{play.attributes.playType}</p>
+                        )}
+                        {play.attributes?.coverage && (
+                          <p>{play.attributes.coverage}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="p-4 bg-gray-50 flex items-center justify-between">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditPlay(play);
+                        }}
+                        className="text-sm text-gray-700 hover:text-black font-medium transition-colors"
+                      >
+                        Edit
+                      </button>
+                      
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleArchivePlay(play.id);
+                          }}
+                          className="text-sm text-gray-700 hover:text-black font-medium transition-colors"
+                        >
+                          Archive
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePlay(play.id);
+                          }}
+                          className="text-sm text-red-600 hover:text-red-700 font-medium transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </>
-        ) : (
-          <>
-            <div className="mb-6">
-              <button
-                onClick={handleBackToList}
-                className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
-              >
-                ← Back to Playbook
-              </button>
-            </div>
-            
-            <PlayBuilder 
-  teamId={selectedTeamId || 'personal'} 
-  teamName={selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name || 'Unknown Team' : 'Personal Playbook'}
-  existingPlay={editingPlay}
-/>
-          </>
         )}
-
-        {/* User Info */}
-        <div className="mt-8 text-center text-sm text-gray-600">
-          Signed in as: <span className="font-medium">{user.email}</span>
-        </div>
       </div>
     </div>
   );
