@@ -207,7 +207,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     const lineOfScrimmage = 200;
     const isLeftSide = startX < 350;
 
-    // Handle full route names from config (e.g., "Go/Streak/9")
     const routeName = routeType.split('/')[0];
 
     switch (routeName) {
@@ -354,7 +353,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     setDraggedPlayer(null);
   };
 
-  // Click to add point, double-click to finish
   const handleFieldClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current || !isDrawingRoute || !selectedPlayer) return;
 
@@ -368,7 +366,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   const handleFieldDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!isDrawingRoute || !selectedPlayer || currentRoute.length < 2) return;
     
-    // Finish the route on double-click
     const player = players.find(p => p.id === selectedPlayer);
     const filteredRoutes = routes.filter(r => r.playerId !== selectedPlayer);
     
@@ -410,11 +407,9 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       )
     );
 
-    // If switching to custom draw, start drawing
     if (assignment === 'Draw Route (Custom)') {
       setTimeout(() => startCustomRoute(playerId), 100);
     } else {
-      // Remove any manually drawn routes for this player
       setRoutes(prev => prev.filter(r => r.playerId !== playerId));
     }
   };
@@ -436,7 +431,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   };
 
   const togglePrimaryReceiver = (playerId: string) => {
-    // Update players - only one can be primary
     setPlayers(prev =>
       prev.map(p => ({
         ...p,
@@ -444,7 +438,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       }))
     );
 
-    // Update routes - preserve the primary status
     setRoutes(prev =>
       prev.map(r => {
         if (r.playerId === playerId) {
@@ -464,7 +457,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       return { x: 350, y: 195 };
     }
 
-    // Find specific linemen positions by their position property
     const center = linemen.find(p => p.position === 'C');
     const lg = linemen.find(p => p.position === 'LG');
     const rg = linemen.find(p => p.position === 'RG');
@@ -475,51 +467,50 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     const lineOfScrimmage = 200;
     const holeY = lineOfScrimmage - 5;
 
-    // Parse hole number - extract just the digit
     const holeMatch = hole.match(/^(\d)/);
     const holeNum = holeMatch ? holeMatch[1] : hole.charAt(0);
 
     switch (holeNum) {
-      case '1': // C-LG gap (between Center and Left Guard)
+      case '1':
         if (lg && center) {
           return { x: (center.x + lg.x) / 2, y: holeY };
         }
         return { x: centerX - 20, y: holeY };
         
-      case '2': // C-RG gap (between Center and Right Guard)
+      case '2':
         if (rg && center) {
           return { x: (center.x + rg.x) / 2, y: holeY };
         }
         return { x: centerX + 20, y: holeY };
         
-      case '3': // LG-LT gap (between Left Guard and Left Tackle)
+      case '3':
         if (lg && lt) {
           return { x: (lg.x + lt.x) / 2, y: holeY };
         }
         return { x: centerX - 60, y: holeY };
         
-      case '4': // RG-RT gap (between Right Guard and Right Tackle)
+      case '4':
         if (rg && rt) {
           return { x: (rg.x + rt.x) / 2, y: holeY };
         }
         return { x: centerX + 60, y: holeY };
         
-      case '5': // Outside LT (left of Left Tackle)
+      case '5':
         if (lt) {
           return { x: lt.x - 30, y: holeY };
         }
         return { x: centerX - 100, y: holeY };
         
-      case '6': // Outside RT (right of Right Tackle)
+      case '6':
         if (rt) {
           return { x: rt.x + 30, y: holeY };
         }
         return { x: centerX + 100, y: holeY };
         
-      case '7': // Far left (outside of formation)
+      case '7':
         return { x: sortedLinemen[0].x - 60, y: holeY };
         
-      case '8': // Far right (outside of formation)
+      case '8':
         return { x: sortedLinemen[sortedLinemen.length - 1].x + 60, y: holeY };
         
       default:
@@ -552,7 +543,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     };
   };
 
-  // Red ball carrier arrow (simple, small arrowhead)
   const renderBallCarrierArrow = (player: Player) => {
     if (playType !== 'Run' || !targetHole || player.label !== ballCarrier) return null;
 
@@ -562,7 +552,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     const endX = holePos.x;
     const endY = holePos.y;
 
-    // Simple path that stays on offensive side
     let pathD = `M ${startX} ${startY}`;
     const midY = Math.max(startY, 205);
     pathD += ` L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
@@ -592,14 +581,12 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     );
   };
 
-  // Gray blocking arrows with T-shape (no arrowhead, just perpendicular line)
   const renderBlockingArrow = (player: Player) => {
     if (!player.blockType && !player.blockResponsibility) return null;
 
     const arrowEnd = getBlockingArrowDirection(player);
     if (!arrowEnd) return null;
 
-    // Calculate perpendicular line for T-shape
     const dx = arrowEnd.endX - player.x;
     const dy = arrowEnd.endY - player.y;
     const length = Math.sqrt(dx * dx + dy * dy);
@@ -608,7 +595,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
 
     return (
       <g key={`block-${player.id}`}>
-        {/* Main line */}
         <line
           x1={player.x}
           y1={player.y}
@@ -617,7 +603,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
           stroke="#888888"
           strokeWidth="2"
         />
-        {/* T-shape perpendicular line at end */}
         <line
           x1={arrowEnd.endX - perpX}
           y1={arrowEnd.endY - perpY}
@@ -630,12 +615,10 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     );
   };
 
-  // Pass routes with small arrowheads
   const renderPassRoute = (route: Route) => {
     const player = players.find(p => p.id === route.playerId);
     if (!player || route.points.length < 2) return null;
 
-    // Simple connected lines
     let pathD = `M ${route.points[0].x} ${route.points[0].y}`;
     for (let i = 1; i < route.points.length; i++) {
       pathD += ` L ${route.points[i].x} ${route.points[i].y}`;
@@ -712,13 +695,11 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       return;
     }
 
-    // Validate formation against football rules
     if (!saveAnywayConfirmed && odk === 'offense') {
       const validation = validateOffensiveFormation(players);
       const illegalFormation = checkIllegalFormation(players);
       const offsidesCheck = checkOffsides(players, 'offense');
       
-      // Combine all validations
       const combinedValidation: FormationValidation = {
         isValid: validation.isValid && illegalFormation.isValid && offsidesCheck.isValid,
         errors: [...validation.errors, ...illegalFormation.errors, ...offsidesCheck.errors],
@@ -825,7 +806,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   const handleSaveAnyway = () => {
     setSaveAnywayConfirmed(true);
     setShowValidationModal(false);
-    // Trigger save again with confirmation flag set
     setTimeout(() => savePlay(), 100);
   };
 
@@ -838,272 +818,156 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              {existingPlay ? 'Edit Play' : 'Create New Play'}
-            </h2>
-            {teamName && (
-              <p className="text-sm text-gray-600 mt-1">Team: {teamName}</p>
-            )}
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-gray-600">Play Code</p>
-            <p className="text-2xl font-bold text-gray-900">{playCode}</p>
-          </div>
-        </div>
+      {/* TWO-COLUMN LAYOUT: Forms Left, Diagram Right (Sticky) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        <div className="mb-6">
-          <label className="block text-sm font-semibold text-gray-800 mb-1">
-            Play Name *
-          </label>
-          <input
-            type="text"
-            value={playName}
-            onChange={(e) => setPlayName(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-            placeholder="e.g., 22 Power, Cover 2 Blitz"
-          />
-        </div>
-
-        <div className="grid grid-cols-3 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1">
-              Type (ODK) *
-            </label>
-            <select
-              value={odk}
-              onChange={(e) => {
-                setOdk(e.target.value as 'offense' | 'defense' | 'specialTeams');
-                setFormation('');
-                setPlayers([]);
-                setRoutes([]);
-                setPlayType('');
-                setTargetHole('');
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-            >
-              <option value="offense">Offense</option>
-              <option value="defense">Defense</option>
-              <option value="specialTeams">Special Teams</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-800 mb-1">
-              Formation * ({availableFormations.length} available)
-            </label>
-            <select
-              value={formation}
-              onChange={(e) => {
-                setFormation(e.target.value);
-                if (e.target.value) loadFormation(e.target.value);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-            >
-              <option value="">Select Formation...</option>
-              {availableFormations.map(f => (
-                <option key={f} value={f}>{f}</option>
-              ))}
-            </select>
-          </div>
-
-          {odk === 'offense' && (
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1">
-                Play Type *
-              </label>
-              <select
-                value={playType}
-                onChange={(e) => {
-                  setPlayType(e.target.value);
-                  setTargetHole('');
-                  setBallCarrier('');
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-              >
-                <option value="">Select...</option>
-                {OFFENSIVE_ATTRIBUTES.playType.map(pt => (
-                  <option key={pt} value={pt}>{pt}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* Hole and Ball Carrier for Run Plays */}
-        {odk === 'offense' && playType === 'Run' && (
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1">
-                Target Hole *
-              </label>
-              <select
-                value={targetHole}
-                onChange={(e) => setTargetHole(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-              >
-                <option value="">Select hole...</option>
-                {RUNNING_HOLES.map(hole => (
-                  <option key={hole.charAt(0)} value={hole}>{hole}</option>
-                ))}
-              </select>
+        {/* ========== LEFT COLUMN: All Forms ========== */}
+        <div className="space-y-6">
+          
+          {/* Header */}
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {existingPlay ? 'Edit Play' : 'Create New Play'}
+                </h2>
+                {teamName && (
+                  <p className="text-sm text-gray-600 mt-1">Team: {teamName}</p>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-600">Play Code</p>
+                <p className="text-2xl font-bold text-gray-900">{playCode}</p>
+              </div>
             </div>
             
-            {targetHole && (
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                Play Name *
+              </label>
+              <input
+                type="text"
+                value={playName}
+                onChange={(e) => setPlayName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                placeholder="e.g., 22 Power, Cover 2 Blitz"
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-800 mb-1">
-                  Ball Carrier *
+                  Type (ODK) *
                 </label>
                 <select
-                  value={ballCarrier}
-                  onChange={(e) => setBallCarrier(e.target.value)}
+                  value={odk}
+                  onChange={(e) => {
+                    setOdk(e.target.value as 'offense' | 'defense' | 'specialTeams');
+                    setFormation('');
+                    setPlayers([]);
+                    setRoutes([]);
+                    setPlayType('');
+                    setTargetHole('');
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                 >
-                  <option value="">Select ball carrier...</option>
-                  {potentialBallCarriers.map(player => (
-                    <option key={player.id} value={player.label}>{player.label} ({player.position})</option>
+                  <option value="offense">Offense</option>
+                  <option value="defense">Defense</option>
+                  <option value="specialTeams">Special Teams</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">
+                  Formation * ({availableFormations.length} available)
+                </label>
+                <select
+                  value={formation}
+                  onChange={(e) => {
+                    setFormation(e.target.value);
+                    if (e.target.value) loadFormation(e.target.value);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                >
+                  <option value="">Select Formation...</option>
+                  {availableFormations.map(f => (
+                    <option key={f} value={f}>{f}</option>
                   ))}
                 </select>
               </div>
-            )}
-          </div>
-        )}
 
-        {/* Formation Metadata Display */}
-        {formation && odk === 'offense' && FORMATION_METADATA[formation] && (
-          <div className="mb-4 border border-blue-200 rounded-lg overflow-hidden">
-            <button
-              onClick={() => setShowFormationMetadata(!showFormationMetadata)}
-              className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 p-3 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 transition-colors"
-            >
-              <h4 className="font-semibold text-gray-900">Formation Info: {formation}</h4>
-              <svg
-                className={`w-5 h-5 text-gray-600 transition-transform ${showFormationMetadata ? 'rotate-180' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showFormationMetadata && (
-              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <p className="text-sm text-gray-700 mb-2">
-                      {FORMATION_METADATA[formation].usage}
-                    </p>
-                  </div>
-                  <div className="ml-4 text-right">
-                    <div className="text-xs text-gray-600 mb-1">
-                      {FORMATION_METADATA[formation].personnel}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-semibold">
-                        Run {FORMATION_METADATA[formation].runPercent}%
-                      </span>
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded font-semibold">
-                        Pass {FORMATION_METADATA[formation].passPercent}%
-                      </span>
-                    </div>
-                  </div>
+              {odk === 'offense' && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Play Type *
+                  </label>
+                  <select
+                    value={playType}
+                    onChange={(e) => {
+                      setPlayType(e.target.value);
+                      setTargetHole('');
+                      setBallCarrier('');
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                  >
+                    <option value="">Select...</option>
+                    {OFFENSIVE_ATTRIBUTES.playType.map(pt => (
+                      <option key={pt} value={pt}>{pt}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Hole and Ball Carrier for Run Plays */}
+            {odk === 'offense' && playType === 'Run' && (
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Target Hole *
+                  </label>
+                  <select
+                    value={targetHole}
+                    onChange={(e) => setTargetHole(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                  >
+                    <option value="">Select hole...</option>
+                    {RUNNING_HOLES.map(hole => (
+                      <option key={hole.charAt(0)} value={hole}>{hole}</option>
+                    ))}
+                  </select>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                {targetHole && (
                   <div>
-                    <span className="font-semibold text-green-700">✓ Strengths:</span>
-                    <p className="text-gray-700 mt-1">
-                      {FORMATION_METADATA[formation].strengths}
-                    </p>
+                    <label className="block text-sm font-semibold text-gray-800 mb-1">
+                      Ball Carrier *
+                    </label>
+                    <select
+                      value={ballCarrier}
+                      onChange={(e) => setBallCarrier(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                    >
+                      <option value="">Select ball carrier...</option>
+                      {potentialBallCarriers.map(player => (
+                        <option key={player.id} value={player.label}>{player.label} ({player.position})</option>
+                      ))}
+                    </select>
                   </div>
-                  <div>
-                    <span className="font-semibold text-red-700">⚠ Weaknesses:</span>
-                    <p className="text-gray-700 mt-1">
-                      {FORMATION_METADATA[formation].weaknesses}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="mt-3 pt-3 border-t border-blue-200">
-                  <span className="text-xs font-semibold text-gray-700">Common Plays: </span>
-                  <span className="text-xs text-gray-600">
-                    {FORMATION_METADATA[formation].commonPlays.join(', ')}
-                  </span>
-                </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Defense Attributes */}
-        {odk === 'defense' && (
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1">
-                Front
-              </label>
-              <select
-                value={front}
-                onChange={(e) => setFront(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-              >
-                <option value="">Select...</option>
-                {DEFENSIVE_ATTRIBUTES.front.map(f => (
-                  <option key={f} value={f}>{f}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1">
-                Coverage
-              </label>
-              <select
-                value={coverage}
-                onChange={(e) => setCoverage(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-              >
-                <option value="">Select...</option>
-                {DEFENSIVE_ATTRIBUTES.coverage.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-1">
-                Blitz Type
-              </label>
-              <select
-                value={blitzType}
-                onChange={(e) => setBlitzType(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
-              >
-                <option value="">Select...</option>
-                {DEFENSIVE_ATTRIBUTES.blitzType.map(b => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Position Assignments Section */}
-        {odk === 'offense' && playType && players.length > 0 && (
-          <div className="space-y-3">
-            <h3 className="text-lg font-bold text-gray-900 border-b pb-2">Player Assignments</h3>
-            
-            {/* Offensive Linemen */}
-            {linemen.length > 0 && (
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
+            {/* Formation Metadata Display */}
+            {formation && odk === 'offense' && FORMATION_METADATA[formation] && (
+              <div className="mb-4 border border-blue-200 rounded-lg overflow-hidden">
                 <button
-                  onClick={() => setShowLinemenSection(!showLinemenSection)}
-                  className="w-full bg-gray-50 p-3 flex items-center justify-between hover:bg-gray-100 transition-colors"
+                  onClick={() => setShowFormationMetadata(!showFormationMetadata)}
+                  className="w-full bg-gradient-to-r from-blue-50 to-indigo-50 p-3 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 transition-colors"
                 >
-                  <h4 className="font-semibold text-gray-900">Offensive Line ({linemen.length})</h4>
+                  <h4 className="font-semibold text-gray-900">Formation Info: {formation}</h4>
                   <svg
-                    className={`w-5 h-5 text-gray-600 transition-transform ${showLinemenSection ? 'rotate-180' : ''}`}
+                    className={`w-5 h-5 text-gray-600 transition-transform ${showFormationMetadata ? 'rotate-180' : ''}`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1111,299 +975,440 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
-                {showLinemenSection && (
-                  <div className="p-4 bg-gray-50">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {linemen.map(player => (
-                        <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
-                          <label className="block text-sm font-bold text-gray-900 mb-2">
-                            {player.label}
-                          </label>
-                          <div className="space-y-2">
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">Block Type</label>
-                              <select
-                                value={player.blockType || ''}
-                                onChange={(e) => updatePlayerBlockType(player.id, e.target.value)}
-                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
-                              >
-                                <option value="">Select...</option>
-                                {BLOCKING_ASSIGNMENTS.map(opt => (
-                                  <option key={opt} value={opt}>{opt}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
-                              <select
-                                value={player.blockResponsibility || ''}
-                                onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
-                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
-                              >
-                                <option value="">Select...</option>
-                                {BLOCK_RESPONSIBILITIES.map(opt => (
-                                  <option key={opt} value={opt}>{opt}</option>
-                                ))}
-                              </select>
+                {showFormationMetadata && (
+                  <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-700 mb-2">
+                          {FORMATION_METADATA[formation].usage}
+                        </p>
+                      </div>
+                      <div className="ml-4 text-right">
+                        <div className="text-xs text-gray-600 mb-1">
+                          {FORMATION_METADATA[formation].personnel}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="px-2 py-1 bg-green-100 text-green-800 rounded font-semibold">
+                            Run {FORMATION_METADATA[formation].runPercent}%
+                          </span>
+                          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded font-semibold">
+                            Pass {FORMATION_METADATA[formation].passPercent}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="font-semibold text-green-700">✓ Strengths:</span>
+                        <p className="text-gray-700 mt-1">
+                          {FORMATION_METADATA[formation].strengths}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="font-semibold text-red-700">⚠ Weaknesses:</span>
+                        <p className="text-gray-700 mt-1">
+                          {FORMATION_METADATA[formation].weaknesses}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="mt-3 pt-3 border-t border-blue-200">
+                      <span className="text-xs font-semibold text-gray-700">Common Plays: </span>
+                      <span className="text-xs text-gray-600">
+                        {FORMATION_METADATA[formation].commonPlays.join(', ')}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Defense Attributes */}
+            {odk === 'defense' && (
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Front
+                  </label>
+                  <select
+                    value={front}
+                    onChange={(e) => setFront(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                  >
+                    <option value="">Select...</option>
+                    {DEFENSIVE_ATTRIBUTES.front.map(f => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Coverage
+                  </label>
+                  <select
+                    value={coverage}
+                    onChange={(e) => setCoverage(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                  >
+                    <option value="">Select...</option>
+                    {DEFENSIVE_ATTRIBUTES.coverage.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">
+                    Blitz Type
+                  </label>
+                  <select
+                    value={blitzType}
+                    onChange={(e) => setBlitzType(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
+                  >
+                    <option value="">Select...</option>
+                    {DEFENSIVE_ATTRIBUTES.blitzType.map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Position Assignments Section */}
+          {odk === 'offense' && playType && players.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-lg font-bold text-gray-900 border-b pb-2">Player Assignments</h3>
+              
+              {/* Offensive Linemen */}
+              {linemen.length > 0 && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setShowLinemenSection(!showLinemenSection)}
+                    className="w-full bg-gray-50 p-3 flex items-center justify-between hover:bg-gray-100 transition-colors"
+                  >
+                    <h4 className="font-semibold text-gray-900">Offensive Line ({linemen.length})</h4>
+                    <svg
+                      className={`w-5 h-5 text-gray-600 transition-transform ${showLinemenSection ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showLinemenSection && (
+                    <div className="p-4 bg-gray-50">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {linemen.map(player => (
+                          <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
+                            <label className="block text-sm font-bold text-gray-900 mb-2">
+                              {player.label}
+                            </label>
+                            <div className="space-y-2">
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">Block Type</label>
+                                <select
+                                  value={player.blockType || ''}
+                                  onChange={(e) => updatePlayerBlockType(player.id, e.target.value)}
+                                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                >
+                                  <option value="">Select...</option>
+                                  {BLOCKING_ASSIGNMENTS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
+                                <select
+                                  value={player.blockResponsibility || ''}
+                                  onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
+                                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                >
+                                  <option value="">Select...</option>
+                                  {BLOCK_RESPONSIBILITIES.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
 
-            {/* QB & Backs */}
-            {backs.length > 0 && (
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setShowBacksSection(!showBacksSection)}
-                  className="w-full bg-blue-50 p-3 flex items-center justify-between hover:bg-blue-100 transition-colors"
-                >
-                  <h4 className="font-semibold text-gray-900">QB & Backs ({backs.length})</h4>
-                  <svg
-                    className={`w-5 h-5 text-gray-600 transition-transform ${showBacksSection ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+              {/* QB & Backs */}
+              {backs.length > 0 && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setShowBacksSection(!showBacksSection)}
+                    className="w-full bg-blue-50 p-3 flex items-center justify-between hover:bg-blue-100 transition-colors"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {showBacksSection && (
-                  <div className="p-4 bg-blue-50">
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                      {backs.map(player => (
-                        <div key={player.id}>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">
-                            {player.label}
-                          </label>
-                          <select
-                            value={player.assignment || ''}
-                            onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
-                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
-                          >
-                            <option value="">Select...</option>
-                            {getAssignmentOptionsForPlayer(player).map(opt => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                          {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
-                            <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
-                              <input
-                                type="checkbox"
-                                checked={player.isPrimary || false}
-                                onChange={() => togglePrimaryReceiver(player.id)}
-                                className="w-3 h-3 mr-1"
-                              />
-                              Primary (red route)
+                    <h4 className="font-semibold text-gray-900">QB & Backs ({backs.length})</h4>
+                    <svg
+                      className={`w-5 h-5 text-gray-600 transition-transform ${showBacksSection ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showBacksSection && (
+                    <div className="p-4 bg-blue-50">
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {backs.map(player => (
+                          <div key={player.id}>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              {player.label}
                             </label>
-                          )}
-                        </div>
-                      ))}
+                            <select
+                              value={player.assignment || ''}
+                              onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
+                            >
+                              <option value="">Select...</option>
+                              {getAssignmentOptionsForPlayer(player).map(opt => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+                            {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
+                              <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                                <input
+                                  type="checkbox"
+                                  checked={player.isPrimary || false}
+                                  onChange={() => togglePrimaryReceiver(player.id)}
+                                  className="w-3 h-3 mr-1"
+                                />
+                                Primary (red route)
+                              </label>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
 
-            {/* Receivers */}
-            {receivers.length > 0 && (
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setShowReceiversSection(!showReceiversSection)}
-                  className="w-full bg-green-50 p-3 flex items-center justify-between hover:bg-green-100 transition-colors"
-                >
-                  <h4 className="font-semibold text-gray-900">Receivers ({receivers.length})</h4>
-                  <svg
-                    className={`w-5 h-5 text-gray-600 transition-transform ${showReceiversSection ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+              {/* Receivers */}
+              {receivers.length > 0 && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setShowReceiversSection(!showReceiversSection)}
+                    className="w-full bg-green-50 p-3 flex items-center justify-between hover:bg-green-100 transition-colors"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {showReceiversSection && (
-                  <div className="p-4 bg-green-50">
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                      {receivers.map(player => (
-                        <div key={player.id}>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">
-                            {player.label}
-                          </label>
-                          <select
-                            value={player.assignment || ''}
-                            onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
-                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
-                          >
-                            <option value="">Select...</option>
-                            {getAssignmentOptionsForPlayer(player).map(opt => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                          {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
-                            <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
-                              <input
-                                type="checkbox"
-                                checked={player.isPrimary || false}
-                                onChange={() => togglePrimaryReceiver(player.id)}
-                                className="w-3 h-3 mr-1"
-                              />
-                              Primary (red route)
+                    <h4 className="font-semibold text-gray-900">Receivers ({receivers.length})</h4>
+                    <svg
+                      className={`w-5 h-5 text-gray-600 transition-transform ${showReceiversSection ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showReceiversSection && (
+                    <div className="p-4 bg-green-50">
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {receivers.map(player => (
+                          <div key={player.id}>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              {player.label}
                             </label>
-                          )}
-                        </div>
-                      ))}
+                            <select
+                              value={player.assignment || ''}
+                              onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
+                            >
+                              <option value="">Select...</option>
+                              {getAssignmentOptionsForPlayer(player).map(opt => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+                            {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
+                              <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                                <input
+                                  type="checkbox"
+                                  checked={player.isPrimary || false}
+                                  onChange={() => togglePrimaryReceiver(player.id)}
+                                  className="w-3 h-3 mr-1"
+                                />
+                                Primary (red route)
+                              </label>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Drawing Canvas */}
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Play Diagram</h3>
-        
-        <div className="mb-4 p-4 bg-gray-50 rounded-md">
-          <p className="text-sm text-gray-700">
-            <strong>Instructions:</strong> Drag players to reposition. Select assignments from dropdowns - routes auto-generate! Check the box next to a receiver to make them primary (red route). {isDrawingRoute ? '✏️ Custom drawing mode: Click to add points, double-click to finish route.' : 'Select "Draw Route (Custom)" to manually draw.'}
-          </p>
-        </div>
-
-        <div className="border-2 border-gray-300 rounded-lg overflow-hidden relative">
-          <svg
-            ref={svgRef}
-            width="700"
-            height="400"
-            className="bg-green-100"
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onClick={handleFieldClick}
-            onDoubleClick={handleFieldDoubleClick}
-          >
-            <rect width="700" height="400" fill="#2a6e3f" />
-            
-            {/* Field markings */}
-            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
-              <line
-                key={i}
-                x1="0"
-                y1={i * 40}
-                x2="700"
-                y2={i * 40}
-                stroke="white"
-                strokeWidth="1"
-                opacity="0.3"
-              />
-            ))}
-
-            {/* Hash marks */}
-            <line x1="250" y1="0" x2="250" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
-            <line x1="450" y1="0" x2="450" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
-            
-            {/* Line of scrimmage */}
-            <line x1="0" y1="200" x2="700" y2="200" stroke="white" strokeWidth="3" />
-
-            {/* Draw arrows FIRST */}
-            {players.map(player => renderBallCarrierArrow(player))}
-            {players.map(player => renderBlockingArrow(player))}
-            {routes.map(route => renderPassRoute(route))}
-
-            {/* Current route being drawn */}
-            {currentRoute.length > 1 && (
-              <g>
-                <path
-                  d={(() => {
-                    let path = `M ${currentRoute[0].x} ${currentRoute[0].y}`;
-                    for (let i = 1; i < currentRoute.length; i++) {
-                      path += ` L ${currentRoute[i].x} ${currentRoute[i].y}`;
-                    }
-                    return path;
-                  })()}
-                  fill="none"
-                  stroke="#FF6600"
-                  strokeWidth="2.5"
-                  strokeDasharray="5,5"
-                />
-                {/* Show click points */}
-                {currentRoute.map((point, idx) => (
-                  <circle
-                    key={idx}
-                    cx={point.x}
-                    cy={point.y}
-                    r="3"
-                    fill="#FF6600"
-                  />
-                ))}
-              </g>
-            )}
-
-            {/* Draw players ON TOP */}
-            {players.map(player => (
-              <g key={player.id}>
-                {player.side === 'defense' ? (
-                  <rect
-                    x={player.x - 12}
-                    y={player.y - 12}
-                    width="24"
-                    height="24"
-                    fill="red"
-                    stroke="white"
-                    strokeWidth="2"
-                    className="cursor-move hover:fill-red-400"
-                    onMouseDown={() => handleMouseDown(player.id)}
-                  />
-                ) : (
-                  <circle
-                    cx={player.x}
-                    cy={player.y}
-                    r="12"
-                    fill="white"
-                    stroke="black"
-                    strokeWidth="2"
-                    className="cursor-move hover:fill-blue-100"
-                    onMouseDown={() => handleMouseDown(player.id)}
-                  />
-                )}
-                <text
-                  x={player.x}
-                  y={player.y + 4}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fontWeight="bold"
-                  fill="black"
-                  pointerEvents="none"
-                >
-                  {player.label}
-                </text>
-              </g>
-            ))}
-          </svg>
-          
-          {isDrawingRoute && (
-            <div className="absolute top-4 right-4 bg-white p-3 rounded-lg shadow-lg border-2 border-orange-400">
-              <p className="text-sm font-semibold text-gray-900 mb-2">
-                ✏️ Drawing Custom Route
-              </p>
-              <p className="text-xs text-gray-600 mb-2">
-                Click: Add point • Double-click: Finish
-              </p>
-              <button
-                onClick={cancelCustomRoute}
-                className="w-full px-3 py-1.5 bg-gray-500 text-white rounded text-sm hover:bg-gray-600 transition-colors"
-              >
-                Cancel (Esc)
-              </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
+
+          {/* Save Button - Bottom of Left Column */}
+          <div className="flex justify-end">
+            <button
+              onClick={savePlay}
+              disabled={isSaving}
+              className="px-6 py-3 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 disabled:bg-gray-400 transition-colors"
+            >
+              {isSaving ? 'Saving...' : existingPlay ? 'Update Play' : 'Save Play'}
+            </button>
+          </div>
+
         </div>
+        {/* ========== END LEFT COLUMN ========== */}
+
+        {/* ========== RIGHT COLUMN: Sticky Diagram ========== */}
+        <div className="lg:sticky lg:top-6 lg:h-fit">
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Play Diagram</h3>
+            
+            <div className="mb-4 p-4 bg-gray-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                <strong>Instructions:</strong> Drag players to reposition. Select assignments from dropdowns - routes auto-generate! Check the box next to a receiver to make them primary (red route). {isDrawingRoute ? '✏️ Custom drawing mode: Click to add points, double-click to finish route.' : 'Select "Draw Route (Custom)" to manually draw.'}
+              </p>
+            </div>
+
+            <div className="border-2 border-gray-300 rounded-lg overflow-hidden relative">
+              <svg
+                ref={svgRef}
+                width="700"
+                height="400"
+                className="w-full h-auto bg-green-100"
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onClick={handleFieldClick}
+                onDoubleClick={handleFieldDoubleClick}
+              >
+                <rect width="700" height="400" fill="#2a6e3f" />
+                
+                {/* Field markings */}
+                {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
+                  <line
+                    key={i}
+                    x1="0"
+                    y1={i * 40}
+                    x2="700"
+                    y2={i * 40}
+                    stroke="white"
+                    strokeWidth="1"
+                    opacity="0.3"
+                  />
+                ))}
+
+                {/* Hash marks */}
+                <line x1="250" y1="0" x2="250" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
+                <line x1="450" y1="0" x2="450" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
+                
+                {/* Line of scrimmage */}
+                <line x1="0" y1="200" x2="700" y2="200" stroke="white" strokeWidth="3" />
+
+                {/* Draw arrows FIRST */}
+                {players.map(player => renderBallCarrierArrow(player))}
+                {players.map(player => renderBlockingArrow(player))}
+                {routes.map(route => renderPassRoute(route))}
+
+                {/* Current route being drawn */}
+                {currentRoute.length > 1 && (
+                  <g>
+                    <path
+                      d={(() => {
+                        let path = `M ${currentRoute[0].x} ${currentRoute[0].y}`;
+                        for (let i = 1; i < currentRoute.length; i++) {
+                          path += ` L ${currentRoute[i].x} ${currentRoute[i].y}`;
+                        }
+                        return path;
+                      })()}
+                      fill="none"
+                      stroke="#FF6600"
+                      strokeWidth="2.5"
+                      strokeDasharray="5,5"
+                    />
+                    {currentRoute.map((point, idx) => (
+                      <circle
+                        key={idx}
+                        cx={point.x}
+                        cy={point.y}
+                        r="3"
+                        fill="#FF6600"
+                      />
+                    ))}
+                  </g>
+                )}
+
+                {/* Draw players ON TOP */}
+                {players.map(player => (
+                  <g key={player.id}>
+                    {player.side === 'defense' ? (
+                      <rect
+                        x={player.x - 12}
+                        y={player.y - 12}
+                        width="24"
+                        height="24"
+                        fill="red"
+                        stroke="white"
+                        strokeWidth="2"
+                        className="cursor-move hover:fill-red-400"
+                        onMouseDown={() => handleMouseDown(player.id)}
+                      />
+                    ) : (
+                      <circle
+                        cx={player.x}
+                        cy={player.y}
+                        r="12"
+                        fill="white"
+                        stroke="black"
+                        strokeWidth="2"
+                        className="cursor-move hover:fill-blue-100"
+                        onMouseDown={() => handleMouseDown(player.id)}
+                      />
+                    )}
+                    <text
+                      x={player.x}
+                      y={player.y + 4}
+                      textAnchor="middle"
+                      fontSize="10"
+                      fontWeight="bold"
+                      fill="black"
+                      pointerEvents="none"
+                    >
+                      {player.label}
+                    </text>
+                  </g>
+                ))}
+              </svg>
+              
+              {isDrawingRoute && (
+                <div className="absolute top-4 right-4 bg-white p-3 rounded-lg shadow-lg border-2 border-orange-400">
+                  <p className="text-sm font-semibold text-gray-900 mb-2">
+                    ✏️ Drawing Custom Route
+                  </p>
+                  <p className="text-xs text-gray-600 mb-2">
+                    Click: Add point • Double-click: Finish
+                  </p>
+                  <button
+                    onClick={cancelCustomRoute}
+                    className="w-full px-3 py-1.5 bg-gray-500 text-white rounded text-sm hover:bg-gray-600 transition-colors"
+                  >
+                    Cancel (Esc)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {/* ========== END RIGHT COLUMN ========== */}
+
       </div>
+      {/* END TWO-COLUMN GRID */}
 
       {/* Validation Modal */}
       {showValidationModal && validationResult && (
@@ -1507,17 +1512,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
           </div>
         </div>
       )}
-
-      {/* Save Button */}
-      <div className="flex justify-end">
-        <button
-          onClick={savePlay}
-          disabled={isSaving}
-          className="px-6 py-3 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 disabled:bg-gray-400 transition-colors"
-        >
-          {isSaving ? 'Saving...' : existingPlay ? 'Update Play' : 'Save Play'}
-        </button>
-      </div>
     </div>
   );
 }
