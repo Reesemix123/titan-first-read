@@ -169,6 +169,21 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
   }, [existingPlay, playCode, teamId, supabase]);
 
+  // Reset routes when play type changes
+  useEffect(() => {
+    if (!existingPlay) {
+      setRoutes([]);
+      // Clear all player assignments
+      setPlayers(prev => prev.map(p => ({
+        ...p,
+        assignment: undefined,
+        blockType: undefined,
+        blockResponsibility: undefined,
+        isPrimary: false
+      })));
+    }
+  }, [playType]);
+
   const loadFormation = (formationName: string) => {
     let formationData;
     
@@ -305,7 +320,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     const newRoutes: Route[] = [];
     
     players.forEach(player => {
-      if (player.assignment && player.assignment !== 'Block' && player.assignment !== 'Draw Route (Custom)' && playType === 'Pass') {
+      // Generate routes for pass plays OR run plays with pass route assignments (decoy routes)
+      if (player.assignment && player.assignment !== 'Block' && player.assignment !== 'Draw Route (Custom)') {
         const routePath = generateRoutePath(player, player.assignment);
         if (routePath.length > 1) {
           // Preserve existing isPrimary status from current routes
@@ -328,7 +344,7 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     });
     
     setRoutes([...newRoutes, ...manualRoutes]);
-  }, [players, playType]);
+  }, [players]);
 
   const handleMouseDown = (playerId: string) => {
     if (isDrawingRoute) return;
@@ -339,8 +355,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     if (!svgRef.current || !draggedPlayer) return;
 
     const rect = svgRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = ((e.clientX - rect.left) / rect.width) * 700;
+    const y = ((e.clientY - rect.top) / rect.height) * 400;
 
     setPlayers(prev =>
       prev.map(p =>
@@ -357,8 +373,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     if (!svgRef.current || !isDrawingRoute || !selectedPlayer) return;
 
     const rect = svgRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = ((e.clientX - rect.left) / rect.width) * 700;
+    const y = ((e.clientY - rect.top) / rect.height) * 400;
 
     setCurrentRoute(prev => [...prev, { x, y }]);
   };
@@ -521,25 +537,85 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   const getBlockingArrowDirection = (player: Player): { endX: number; endY: number } | null => {
     if (!player.blockType && !player.blockResponsibility) return null;
 
-    const baseLength = 30;
-    let angle = -45;
-
-    if (player.blockType === 'Down') {
-      angle = -60;
-    } else if (player.blockType === 'Reach') {
-      angle = -30;
-    } else if (player.blockType === 'Pull') {
-      const direction = player.blockResponsibility?.includes('Left') ? -1 : 1;
+    const baseLength = 35;
+    const centerX = player.x;
+    const centerY = player.y;
+    
+    // Handle Pull blocks - horizontal movement with longer arrow
+    if (player.blockType === 'Pull') {
+      let direction = 0;
+      if (player.blockResponsibility?.includes('Left') || player.blockResponsibility?.includes('left')) {
+        direction = -1;
+      } else if (player.blockResponsibility?.includes('Right') || player.blockResponsibility?.includes('right')) {
+        direction = 1;
+      } else {
+        // Default pull right if not specified
+        direction = 1;
+      }
       return {
-        endX: player.x + (baseLength * 1.5 * direction),
-        endY: player.y
+        endX: centerX + (baseLength * 2 * direction),
+        endY: centerY
       };
+    }
+
+    // Calculate angle based on responsibility (who to block)
+    let angle = -45; // Default angle (straight ahead and slightly left)
+    
+    if (player.blockResponsibility) {
+      const resp = player.blockResponsibility.toLowerCase();
+      
+      // Nose tackle - straight ahead
+      if (resp.includes('nose')) {
+        angle = -90;
+      }
+      // 1-tech (inside gap) - slight angle
+      else if (resp.includes('1-tech') || resp.includes('1 tech')) {
+        angle = -75;
+      }
+      // 3-tech (outside shoulder) - wider angle
+      else if (resp.includes('3-tech') || resp.includes('3 tech')) {
+        angle = -60;
+      }
+      // 5-tech (outside) - even wider
+      else if (resp.includes('5-tech') || resp.includes('5 tech')) {
+        angle = -45;
+      }
+      // Edge/EMOL - horizontal or very wide
+      else if (resp.includes('emol') || resp.includes('edge')) {
+        angle = -30;
+      }
+      // Linebacker - more upfield
+      else if (resp.includes('lb') || resp.includes('mike') || resp.includes('will') || resp.includes('sam') || resp.includes('linebacker')) {
+        angle = -75;
+      }
+      // Safety - far upfield
+      else if (resp.includes('safety') || resp.includes('fs') || resp.includes('ss')) {
+        angle = -85;
+      }
+      // Defensive back - far upfield
+      else if (resp.includes('cb') || resp.includes('corner')) {
+        angle = -80;
+      }
+    }
+    
+    // Adjust angle based on block type
+    if (player.blockType) {
+      const blockTypeLower = player.blockType.toLowerCase();
+      if (blockTypeLower === 'down') {
+        angle -= 15; // More aggressive downfield
+      } else if (blockTypeLower === 'reach') {
+        angle += 15; // More lateral
+      } else if (blockTypeLower === 'scoop') {
+        angle = -60; // Angled upfield
+      } else if (blockTypeLower === 'combo') {
+        angle = -70; // Mostly upfield with some lateral
+      }
     }
 
     const radians = (angle * Math.PI) / 180;
     return {
-      endX: player.x + baseLength * Math.cos(radians),
-      endY: player.y + baseLength * Math.sin(radians)
+      endX: centerX + baseLength * Math.cos(radians),
+      endY: centerY + baseLength * Math.sin(radians)
     };
   };
 
@@ -582,8 +658,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   };
 
   const renderBlockingArrow = (player: Player) => {
-    if (!player.blockType && !player.blockResponsibility) return null;
-
     const arrowEnd = getBlockingArrowDirection(player);
     if (!arrowEnd) return null;
 
@@ -673,7 +747,14 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     
     if (playType === 'Run') {
       if (group === 'linemen') return [];
-      if (group === 'backs') return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
+      // For backs on run plays: allow Block OR pass routes (as decoys), but only if not the ball carrier
+      if (group === 'backs') {
+        if (player.label === ballCarrier) {
+          return []; // Ball carrier doesn't get assignment options
+        }
+        return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
+      }
+      // Receivers can block or run decoy routes on run plays
       if (group === 'receivers') return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
     } else if (playType === 'Pass') {
       if (group === 'linemen') return [];
@@ -919,6 +1000,15 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               )}
             </div>
 
+            {/* Coming Soon Message for Other Play Types */}
+            {odk === 'offense' && playType && playType !== 'Run' && playType !== 'Pass' && (
+              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>🚧 Coming Soon:</strong> {playType} play configuration is under development. For now, please use Run or Pass play types.
+                </p>
+              </div>
+            )}
+
             {/* Hole and Ball Carrier for Run Plays */}
             {odk === 'offense' && playType === 'Run' && (
               <div className="grid grid-cols-2 gap-4 mb-4">
@@ -1076,8 +1166,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
             )}
           </div>
 
-          {/* Position Assignments Section */}
-          {odk === 'offense' && playType && players.length > 0 && (
+          {/* Position Assignments Section - Only show for Run and Pass */}
+          {odk === 'offense' && (playType === 'Run' || playType === 'Pass') && players.length > 0 && (
             <div className="space-y-3">
               <h3 className="text-lg font-bold text-gray-900 border-b pb-2">Player Assignments</h3>
               
@@ -1161,35 +1251,81 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                   </button>
                   {showBacksSection && (
                     <div className="p-4 bg-blue-50">
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {backs.map(player => (
-                          <div key={player.id}>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
-                              {player.label}
-                            </label>
-                            <select
-                              value={player.assignment || ''}
-                              onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
-                            >
-                              <option value="">Select...</option>
-                              {getAssignmentOptionsForPlayer(player).map(opt => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
-                            {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
-                              <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
-                                <input
-                                  type="checkbox"
-                                  checked={player.isPrimary || false}
-                                  onChange={() => togglePrimaryReceiver(player.id)}
-                                  className="w-3 h-3 mr-1"
-                                />
-                                Primary (red route)
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {backs.map(player => {
+                          const isBallCarrier = playType === 'Run' && player.label === ballCarrier;
+                          return (
+                            <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
+                              <label className="block text-sm font-bold text-gray-900 mb-2">
+                                {player.label}
+                                {isBallCarrier && <span className="ml-2 text-xs text-red-600">(Ball Carrier)</span>}
                               </label>
-                            )}
-                          </div>
-                        ))}
+                              
+                              {!isBallCarrier && (
+                                <>
+                                  <select
+                                    value={player.assignment || ''}
+                                    onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
+                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-2"
+                                  >
+                                    <option value="">Select...</option>
+                                    {getAssignmentOptionsForPlayer(player).map(opt => (
+                                      <option key={opt} value={opt}>{opt}</option>
+                                    ))}
+                                  </select>
+                                  
+                                  {/* Blocking dropdowns for backs when Block is selected */}
+                                  {player.assignment === 'Block' && (
+                                    <div className="space-y-2 mt-2">
+                                      <div>
+                                        <label className="block text-xs text-gray-600 mb-1">Block Type</label>
+                                        <select
+                                          value={player.blockType || ''}
+                                          onChange={(e) => updatePlayerBlockType(player.id, e.target.value)}
+                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                        >
+                                          <option value="">Select...</option>
+                                          {BLOCKING_ASSIGNMENTS.map(opt => (
+                                            <option key={opt} value={opt}>{opt}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
+                                        <select
+                                          value={player.blockResponsibility || ''}
+                                          onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
+                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                        >
+                                          <option value="">Select...</option>
+                                          {BLOCK_RESPONSIBILITIES.map(opt => (
+                                            <option key={opt} value={opt}>{opt}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {player.assignment && player.assignment !== 'Block' && (
+                                    <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800 mt-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={player.isPrimary || false}
+                                        onChange={() => togglePrimaryReceiver(player.id)}
+                                        className="w-3 h-3 mr-1"
+                                      />
+                                      Primary (red route)
+                                    </label>
+                                  )}
+                                </>
+                              )}
+                              
+                              {isBallCarrier && (
+                                <p className="text-xs text-gray-600 italic">Carrying the ball to hole {targetHole}</p>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1215,24 +1351,57 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                   </button>
                   {showReceiversSection && (
                     <div className="p-4 bg-green-50">
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {receivers.map(player => (
-                          <div key={player.id}>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                          <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
+                            <label className="block text-sm font-bold text-gray-900 mb-2">
                               {player.label}
                             </label>
                             <select
                               value={player.assignment || ''}
                               onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-1"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-2"
                             >
                               <option value="">Select...</option>
                               {getAssignmentOptionsForPlayer(player).map(opt => (
                                 <option key={opt} value={opt}>{opt}</option>
                               ))}
                             </select>
-                            {playType === 'Pass' && player.assignment && player.assignment !== 'Block' && (
-                              <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                            
+                            {/* Blocking dropdowns for receivers when Block is selected */}
+                            {player.assignment === 'Block' && (
+                              <div className="space-y-2 mt-2">
+                                <div>
+                                  <label className="block text-xs text-gray-600 mb-1">Block Type</label>
+                                  <select
+                                    value={player.blockType || ''}
+                                    onChange={(e) => updatePlayerBlockType(player.id, e.target.value)}
+                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                  >
+                                    <option value="">Select...</option>
+                                    {BLOCKING_ASSIGNMENTS.map(opt => (
+                                      <option key={opt} value={opt}>{opt}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
+                                  <select
+                                    value={player.blockResponsibility || ''}
+                                    onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
+                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                  >
+                                    <option value="">Select...</option>
+                                    {BLOCK_RESPONSIBILITIES.map(opt => (
+                                      <option key={opt} value={opt}>{opt}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {player.assignment && player.assignment !== 'Block' && (
+                              <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800 mt-2">
                                 <input
                                   type="checkbox"
                                   checked={player.isPrimary || false}
@@ -1271,18 +1440,22 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
           <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
             <h3 className="text-lg font-bold text-gray-900 mb-4">Play Diagram</h3>
             
-            <div className="mb-4 p-4 bg-gray-50 rounded-md">
-              <p className="text-sm text-gray-700">
-                <strong>Instructions:</strong> Drag players to reposition. Select assignments from dropdowns - routes auto-generate! Check the box next to a receiver to make them primary (red route). {isDrawingRoute ? '✏️ Custom drawing mode: Click to add points, double-click to finish route.' : 'Select "Draw Route (Custom)" to manually draw.'}
+            {/* Instructions OUTSIDE the SVG */}
+            <div className="mb-4 p-3 bg-gray-50 rounded-md text-xs leading-relaxed">
+              <p className="text-gray-700">
+                <strong>Drag players</strong> to reposition. <strong>Select assignments</strong> from dropdowns - routes auto-generate! 
+                {isDrawingRoute && (
+                  <span className="text-orange-600 font-semibold"> ✏️ Drawing mode active: Click to add points, double-click to finish.</span>
+                )}
               </p>
             </div>
 
             <div className="border-2 border-gray-300 rounded-lg overflow-hidden relative">
               <svg
                 ref={svgRef}
-                width="700"
-                height="400"
+                viewBox="0 0 700 400"
                 className="w-full h-auto bg-green-100"
+                preserveAspectRatio="xMidYMid meet"
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onClick={handleFieldClick}
@@ -1387,19 +1560,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               </svg>
               
               {isDrawingRoute && (
-                <div className="absolute top-4 right-4 bg-white p-3 rounded-lg shadow-lg border-2 border-orange-400">
-                  <p className="text-sm font-semibold text-gray-900 mb-2">
-                    ✏️ Drawing Custom Route
-                  </p>
-                  <p className="text-xs text-gray-600 mb-2">
-                    Click: Add point • Double-click: Finish
-                  </p>
-                  <button
-                    onClick={cancelCustomRoute}
-                    className="w-full px-3 py-1.5 bg-gray-500 text-white rounded text-sm hover:bg-gray-600 transition-colors"
-                  >
-                    Cancel (Esc)
-                  </button>
+                <div className="absolute top-2 right-2 bg-orange-500 text-white px-3 py-1 rounded-lg shadow-lg text-xs font-semibold">
+                  ✏️ Drawing Route
                 </div>
               )}
             </div>
