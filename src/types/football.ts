@@ -9,6 +9,14 @@ export interface Player {
   x: number;
   y: number;
   label: string;
+  assignment?: string;
+  blockType?: string;           
+  blockResponsibility?: string;
+  isPrimary?: boolean;
+  // Pre-snap motion (NEW)
+  motionType?: 'None' | 'Jet' | 'Orbit' | 'Across' | 'Return' | 'Shift';
+  motionDirection?: 'toward-center' | 'away-from-center';
+  motionEndpoint?: { x: number; y: number }; // Draggable endpoint for motion path
 }
 
 /**
@@ -20,6 +28,7 @@ export interface Route {
   path: { x: number; y: number }[];
   type: 'pass' | 'run' | 'block';
   routeType?: string;
+  isPrimary?: boolean;
 }
 
 /**

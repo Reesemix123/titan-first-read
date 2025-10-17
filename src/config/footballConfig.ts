@@ -597,7 +597,456 @@ export const OFFENSIVE_FORMATIONS: FormationConfig = {
     { position: 'RB', x: 300, y: 260, label: 'RB' }
   ]
 };
+// ============================================
+// DEFENSIVE ALIGNMENT SYSTEM
+// Add this section to footballConfig.ts after POSITION_GROUPS
+// ============================================
 
+/**
+ * Type for offensive line reference points used in defensive positioning
+ */
+export interface OffensiveLineReference {
+  lineOfScrimmage: number;
+  centerX: number;
+  center?: { x: number; y: number };
+  lg?: { x: number; y: number };
+  rg?: { x: number; y: number };
+  lt?: { x: number; y: number };
+  rt?: { x: number; y: number };
+  responsibility: string; // lowercase responsibility string
+}
+
+/**
+ * Defensive alignment configuration
+ * Each alignment defines:
+ * - matchTerms: Keywords that identify this alignment from block responsibility
+ * - description: What this alignment means
+ * - getPosition: Function that calculates field position relative to offensive line
+ */
+export interface DefensiveAlignment {
+  matchTerms: string[];
+  description: string;
+  depth: number; // Yards off line of scrimmage
+  getPosition: (ref: OffensiveLineReference) => { x: number; y: number };
+}
+
+/**
+ * DEFENSIVE ALIGNMENTS CONFIGURATION
+ * 
+ * This maps defensive responsibilities to actual field positions.
+ * Positions are calculated relative to offensive linemen for accuracy.
+ * 
+ * COACHING REFERENCE:
+ * - Techniques (0, 1, 2i, 3, 4i, 5, 6, 7, 9): DL alignment relative to OL
+ * - Gaps (A, B, C, D): Spaces between offensive linemen
+ * - Levels: 1st (DL), 2nd (LB), 3rd (DB)
+ * 
+ * Y-axis: Lower values = deeper in defense (away from LOS at y=200)
+ */
+export const DEFENSIVE_ALIGNMENTS: Record<string, DefensiveAlignment> = {
+  // ========== DEFENSIVE LINE TECHNIQUES ==========
+  
+  NOSE: {
+    matchTerms: ['nose', 'nt', '0-tech', '0 tech'],
+    description: 'Nose Tackle - Head up on center (0-technique)',
+    depth: 1.5,
+    getPosition: (ref) => ({
+      x: ref.centerX,
+      y: ref.lineOfScrimmage - 15
+    })
+  },
+
+  ONE_TECH: {
+    matchTerms: ['1-tech', '1 tech', '1tech', 'inside guard'],
+    description: 'Defensive Tackle - Inside shoulder of guard (A-gap)',
+    depth: 1.5,
+    getPosition: (ref) => {
+      // Determine side from responsibility
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('lg')) {
+        return {
+          x: (ref.lg?.x || ref.centerX - 40) - 10,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      // Default to right
+      return {
+        x: (ref.rg?.x || ref.centerX + 40) + 10,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  TWO_I_TECH: {
+    matchTerms: ['2i-tech', '2i tech', '2i', 'head up guard'],
+    description: 'Defensive Tackle - Head up on guard (2i-technique)',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('lg')) {
+        return {
+          x: ref.lg?.x || ref.centerX - 40,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: ref.rg?.x || ref.centerX + 40,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  THREE_TECH: {
+    matchTerms: ['3-tech', '3 tech', '3tech', 'outside guard', 'rdt', 'ldt'],
+    description: 'Defensive Tackle - Outside shoulder of guard (B-gap)',
+    depth: 1.5,
+    getPosition: (ref) => {
+      // Check for explicit side designation
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('lg') || ref.responsibility.includes('ldt')) {
+        return {
+          x: (ref.lg?.x || ref.centerX - 40) - 20,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      // Default to right (most common 3-tech)
+      return {
+        x: (ref.rg?.x || ref.centerX + 40) + 20,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  FOUR_I_TECH: {
+    matchTerms: ['4i-tech', '4i tech', '4i', 'head up tackle'],
+    description: 'Defensive End - Head up on tackle (4i-technique)',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('lt')) {
+        return {
+          x: ref.lt?.x || ref.centerX - 80,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: ref.rt?.x || ref.centerX + 80,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  FIVE_TECH: {
+    matchTerms: ['5-tech', '5 tech', '5tech', 'outside tackle'],
+    description: 'Defensive End - Outside shoulder of tackle (C-gap)',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('lt')) {
+        return {
+          x: (ref.lt?.x || ref.centerX - 80) - 20,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      // Default to right
+      return {
+        x: (ref.rt?.x || ref.centerX + 80) + 20,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  SIX_TECH: {
+    matchTerms: ['6-tech', '6 tech', '6tech', '6 technique'],
+    description: 'Defensive End - Inside shoulder of tight end',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left')) {
+        return {
+          x: (ref.lt?.x || ref.centerX - 80) - 40,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: (ref.rt?.x || ref.centerX + 80) + 40,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  SEVEN_TECH: {
+    matchTerms: ['7-tech', '7 tech', '7tech'],
+    description: 'Defensive End - Head up on tight end',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left')) {
+        return {
+          x: (ref.lt?.x || ref.centerX - 80) - 50,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: (ref.rt?.x || ref.centerX + 80) + 50,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  NINE_TECH: {
+    matchTerms: ['9-tech', '9 tech', '9tech', 'wide 9'],
+    description: 'Defensive End - Wide outside (speed rush)',
+    depth: 1.0,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left')) {
+        return {
+          x: (ref.lt?.x || ref.centerX - 80) - 70,
+          y: ref.lineOfScrimmage - 10
+        };
+      }
+      return {
+        x: (ref.rt?.x || ref.centerX + 80) + 70,
+        y: ref.lineOfScrimmage - 10
+      };
+    }
+  },
+
+  EDGE: {
+    matchTerms: ['edge', 'emol', 'end man on line', 'de'],
+    description: 'Edge Defender - Outside the last man on LOS',
+    depth: 1.0,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left')) {
+        return {
+          x: (ref.lt?.x || ref.centerX - 80) - 40,
+          y: ref.lineOfScrimmage - 10
+        };
+      }
+      // Default to right
+      return {
+        x: (ref.rt?.x || ref.centerX + 80) + 40,
+        y: ref.lineOfScrimmage - 10
+      };
+    }
+  },
+
+  // ========== GAP ASSIGNMENTS ==========
+
+  A_GAP: {
+    matchTerms: ['a-gap', 'a gap', 'agap', 'playside a', 'backside a'],
+    description: 'A-Gap - Between center and guard',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('backside a')) {
+        return {
+          x: ref.centerX - 25,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: ref.centerX + 25,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  B_GAP: {
+    matchTerms: ['b-gap', 'b gap', 'bgap', 'playside b', 'backside b'],
+    description: 'B-Gap - Between guard and tackle',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('backside b')) {
+        return {
+          x: ref.centerX - 60,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: ref.centerX + 60,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  C_GAP: {
+    matchTerms: ['c-gap', 'c gap', 'cgap', 'playside c', 'backside c'],
+    description: 'C-Gap - Between tackle and tight end',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('backside c')) {
+        return {
+          x: ref.centerX - 100,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: ref.centerX + 100,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  D_GAP: {
+    matchTerms: ['d-gap', 'd gap', 'dgap', 'playside d', 'backside d'],
+    description: 'D-Gap - Outside tight end',
+    depth: 1.5,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left') || ref.responsibility.includes('backside d')) {
+        return {
+          x: ref.centerX - 140,
+          y: ref.lineOfScrimmage - 15
+        };
+      }
+      return {
+        x: ref.centerX + 140,
+        y: ref.lineOfScrimmage - 15
+      };
+    }
+  },
+
+  // ========== LINEBACKERS (2ND LEVEL) ==========
+
+  MIKE_LB: {
+    matchTerms: ['mike', 'mlb', 'middle linebacker'],
+    description: 'Mike Linebacker - Middle, 5-7 yards deep',
+    depth: 6,
+    getPosition: (ref) => ({
+      x: ref.centerX,
+      y: ref.lineOfScrimmage - 60
+    })
+  },
+
+  WILL_LB: {
+    matchTerms: ['will', 'wlb', 'weakside linebacker', 'weak lb'],
+    description: 'Will Linebacker - Weakside, 5-7 yards deep',
+    depth: 6,
+    getPosition: (ref) => ({
+      x: ref.centerX - 80,
+      y: ref.lineOfScrimmage - 60
+    })
+  },
+
+  SAM_LB: {
+    matchTerms: ['sam', 'slb', 'strongside linebacker', 'strong lb'],
+    description: 'Sam Linebacker - Strongside, 5-7 yards deep',
+    depth: 6,
+    getPosition: (ref) => ({
+      x: ref.centerX + 80,
+      y: ref.lineOfScrimmage - 60
+    })
+  },
+
+  GENERIC_LB: {
+    matchTerms: ['lb', 'linebacker', 'backer'],
+    description: 'Generic Linebacker - 5-7 yards deep',
+    depth: 6,
+    getPosition: (ref) => ({
+      x: ref.centerX,
+      y: ref.lineOfScrimmage - 60
+    })
+  },
+
+  SECOND_LEVEL: {
+    matchTerms: ['second level', '2nd level', 'next level'],
+    description: 'Second level defender - 6-8 yards deep',
+    depth: 7,
+    getPosition: (ref) => ({
+      x: ref.centerX,
+      y: ref.lineOfScrimmage - 70
+    })
+  },
+
+  // ========== DEFENSIVE BACKS (3RD LEVEL) ==========
+
+  FREE_SAFETY: {
+    matchTerms: ['free safety', 'free', 'fs', 'single high'],
+    description: 'Free Safety - Deep middle, 10-12 yards',
+    depth: 11,
+    getPosition: (ref) => ({
+      x: ref.centerX,
+      y: ref.lineOfScrimmage - 110
+    })
+  },
+
+  STRONG_SAFETY: {
+    matchTerms: ['strong safety', 'strong', 'ss'],
+    description: 'Strong Safety - Strongside, 8-12 yards',
+    depth: 10,
+    getPosition: (ref) => ({
+      x: ref.centerX + 100,
+      y: ref.lineOfScrimmage - 100
+    })
+  },
+
+  CORNERBACK: {
+    matchTerms: ['corner', 'cornerback', 'cb'],
+    description: 'Cornerback - Outside, 8-10 yards',
+    depth: 9,
+    getPosition: (ref) => {
+      if (ref.responsibility.includes('left')) {
+        return {
+          x: 100,
+          y: ref.lineOfScrimmage - 90
+        };
+      }
+      // Default to right
+      return {
+        x: 600,
+        y: ref.lineOfScrimmage - 90
+      };
+    }
+  },
+
+  SAFETY: {
+    matchTerms: ['safety'],
+    description: 'Generic Safety - Deep, 10-12 yards',
+    depth: 11,
+    getPosition: (ref) => ({
+      x: ref.centerX + 50,
+      y: ref.lineOfScrimmage - 110
+    })
+  }
+};
+
+/**
+ * Helper function to get defensive position using the config
+ * This replaces hardcoded position calculations
+ */
+export function getDefensivePositionFromConfig(
+  responsibility: string,
+  offensiveLineRef: OffensiveLineReference
+): { x: number; y: number } | null {
+  const resp = responsibility.toLowerCase();
+
+  // Try to find matching alignment in config
+  for (const alignment of Object.values(DEFENSIVE_ALIGNMENTS)) {
+    const matches = alignment.matchTerms.some(term => resp.includes(term.toLowerCase()));
+    
+    if (matches) {
+      return alignment.getPosition({
+        ...offensiveLineRef,
+        responsibility: resp
+      });
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get all defensive alignments for a specific level (DL, LB, DB)
+ * Useful for UI/educational features
+ */
+export function getDefensiveAlignmentsByLevel(level: 'DL' | 'LB' | 'DB'): DefensiveAlignment[] {
+  return Object.values(DEFENSIVE_ALIGNMENTS).filter(alignment => {
+    if (level === 'DL') return alignment.depth <= 2;
+    if (level === 'LB') return alignment.depth > 2 && alignment.depth <= 8;
+    if (level === 'DB') return alignment.depth > 8;
+    return false;
+  });
+}
+
+/**
+ * Get all possible defensive techniques/alignments
+ * Useful for populating dropdowns or educational content
+ */
+export function getAllDefensiveTechniques(): string[] {
+  return Object.values(DEFENSIVE_ALIGNMENTS).map(a => a.description);
+}
 // ============================================
 // FORMATION METADATA FOR COACHES
 // Provides usage guidance and stats
@@ -1005,3 +1454,215 @@ export const FOOTBALL_CONFIG = {
     validatePlayAttributes
   }
 } as const;
+
+// ============================================
+// MOTION CONFIGURATION
+// Add this entire section to the END of footballConfig.ts
+// (After DEFENSIVE_ALIGNMENTS and all helper functions)
+// ============================================
+
+/**
+ * Pre-snap motion types with coaching definitions
+ */
+export interface MotionType {
+  name: string;
+  description: string;
+  defaultEndpointOffset: { x: number; y: number }; // Relative to player start
+  isLegalAtSnap: boolean; // Can motion continue through snap?
+  requiresSet: boolean; // Must come to set before snap?
+}
+
+/**
+ * MOTION TYPES CONFIGURATION
+ * 
+ * Defines all legal pre-snap motion with football-accurate rules.
+ * Each motion has a default endpoint offset that can be dragged by coach.
+ * 
+ * NFHS/High School Rules:
+ * - One player in motion at snap (max)
+ * - Must be set 1 second before motion
+ * - Motion at snap must be parallel or backward (not toward LOS)
+ * - Motion player must be off the line of scrimmage
+ */
+export const MOTION_TYPES: Record<string, MotionType> = {
+  NONE: {
+    name: 'None',
+    description: 'No motion. Player stays in original alignment.',
+    defaultEndpointOffset: { x: 0, y: 0 },
+    isLegalAtSnap: true,
+    requiresSet: false
+  },
+
+  JET: {
+    name: 'Jet',
+    description: 'Fast lateral motion toward center, timed to arrive at snap. Threatens sweep or creates bunch.',
+    defaultEndpointOffset: { x: 0, y: 0 }, // Will be calculated toward center
+    isLegalAtSnap: true, // Motion is parallel, legal
+    requiresSet: true
+  },
+
+  ORBIT: {
+    name: 'Orbit',
+    description: 'Arcing loop behind QB, exiting to opposite side. Sets up swing/wheel or backfield misdirection.',
+    defaultEndpointOffset: { x: 0, y: 30 }, // Behind QB, will flip based on direction
+    isLegalAtSnap: true, // Ends parallel/backward
+    requiresSet: true
+  },
+
+  ACROSS: {
+    name: 'Across',
+    description: 'Short lateral move across formation (in front of QB) to re-stack or flip strength.',
+    defaultEndpointOffset: { x: 100, y: 0 }, // Lateral across formation
+    isLegalAtSnap: true, // Parallel motion
+    requiresSet: true
+  },
+
+  RETURN: {
+    name: 'Return',
+    description: 'Fake motion that starts then returns to final spot before snap. Misleads defense rotations.',
+    defaultEndpointOffset: { x: 0, y: 0 }, // Returns to original or nearby spot
+    isLegalAtSnap: false, // Must be set at snap
+    requiresSet: true
+  },
+
+  SHIFT: {
+    name: 'Shift',
+    description: 'Static realignment. Player moves to new position, then comes fully set (1 sec) before snap.',
+    defaultEndpointOffset: { x: 80, y: 0 }, // Generic shift position
+    isLegalAtSnap: false, // Must be set at snap (it's a shift, not motion)
+    requiresSet: true
+  }
+};
+
+/**
+ * Motion direction context
+ */
+export type MotionDirection = 'toward-center' | 'away-from-center';
+
+/**
+ * Calculate motion endpoint based on type and direction
+ * 
+ * @param playerStart - Player's starting position {x, y}
+ * @param motionType - Type of motion (Jet, Orbit, etc.)
+ * @param direction - Direction of motion (toward-center or away-from-center)
+ * @param centerX - X coordinate of field center (default 350)
+ * @returns Calculated endpoint position {x, y}
+ */
+export function calculateMotionEndpoint(
+  playerStart: { x: number; y: number },
+  motionType: string,
+  direction: MotionDirection,
+  centerX: number = 350
+): { x: number; y: number } {
+  const motion = MOTION_TYPES[motionType.toUpperCase()];
+  if (!motion || motionType === 'None') {
+    return playerStart;
+  }
+
+  const isLeftOfCenter = playerStart.x < centerX;
+  const offset = motion.defaultEndpointOffset;
+
+  switch (motionType) {
+    case 'Jet':
+      // Jet toward center
+      if (direction === 'toward-center') {
+        return {
+          x: isLeftOfCenter ? playerStart.x + 120 : playerStart.x - 120,
+          y: playerStart.y
+        };
+      } else {
+        // Away from center
+        return {
+          x: isLeftOfCenter ? playerStart.x - 80 : playerStart.x + 80,
+          y: playerStart.y
+        };
+      }
+
+    case 'Orbit':
+      // Loop behind QB
+      if (direction === 'toward-center') {
+        return {
+          x: isLeftOfCenter ? centerX + 80 : centerX - 80,
+          y: playerStart.y + 30
+        };
+      } else {
+        return {
+          x: isLeftOfCenter ? playerStart.x - 60 : playerStart.x + 60,
+          y: playerStart.y + 40
+        };
+      }
+
+    case 'Across':
+      // Short lateral across formation
+      if (direction === 'toward-center') {
+        return {
+          x: centerX,
+          y: playerStart.y
+        };
+      } else {
+        return {
+          x: isLeftOfCenter ? playerStart.x - 80 : playerStart.x + 80,
+          y: playerStart.y
+        };
+      }
+
+    case 'Return':
+      // Return to similar spot (slight adjustment)
+      return {
+        x: direction === 'toward-center' 
+          ? playerStart.x + (isLeftOfCenter ? 30 : -30)
+          : playerStart.x + (isLeftOfCenter ? -20 : 20),
+        y: playerStart.y
+      };
+
+    case 'Shift':
+      // Static shift to new position
+      if (direction === 'toward-center') {
+        return {
+          x: isLeftOfCenter ? playerStart.x + 80 : playerStart.x - 80,
+          y: playerStart.y
+        };
+      } else {
+        return {
+          x: isLeftOfCenter ? playerStart.x - 80 : playerStart.x + 80,
+          y: playerStart.y
+        };
+      }
+
+    default:
+      return {
+        x: playerStart.x + offset.x,
+        y: playerStart.y + offset.y
+      };
+  }
+}
+
+/**
+ * Get motion types that are legal for a given position
+ * Linemen cannot be in motion
+ * 
+ * @param position - Player position code (e.g., 'LT', 'WR', 'RB')
+ * @returns Array of legal motion type names
+ */
+export function getLegalMotionTypes(position: string): string[] {
+  // Linemen cannot be in motion
+  const linemen = ['LT', 'LG', 'C', 'RG', 'RT'];
+  if (linemen.includes(position)) {
+    return ['None'];
+  }
+
+  // All other positions can use any motion
+  return Object.keys(MOTION_TYPES);
+}
+
+/**
+ * Check if motion is legal at snap (for validation)
+ * Return and Shift must be set at snap
+ * 
+ * @param motionType - Type of motion
+ * @returns true if motion can continue through snap
+ */
+export function isMotionLegalAtSnap(motionType: string): boolean {
+  const motion = MOTION_TYPES[motionType.toUpperCase()];
+  return motion ? motion.isLegalAtSnap : true;
+}

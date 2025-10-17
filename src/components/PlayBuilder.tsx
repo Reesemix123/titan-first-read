@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import type { PlayAttributes, PlayDiagram } from '@/types/football';
+import type { OffensiveLineReference } from '@/config/footballConfig';
 import {
   OFFENSIVE_FORMATIONS,
   DEFENSIVE_FORMATIONS,
@@ -17,13 +18,17 @@ import {
   getAttributeOptions,
   getAssignmentOptions,
   POSITION_GROUPS,
-  FORMATION_METADATA
+  FORMATION_METADATA,
+  DEFENSIVE_ALIGNMENTS,
+  MOTION_TYPES,
+  calculateMotionEndpoint
 } from '@/config/footballConfig';
 import {
   validateOffensiveFormation,
   validateDefensiveFormation,
   checkIllegalFormation,
   checkOffsides,
+  validateMotion,
   getValidationSummary,
   type FormationValidation
 } from '@/config/footballRules';
@@ -39,6 +44,9 @@ interface Player {
   blockType?: string;
   blockResponsibility?: string;
   isPrimary?: boolean;
+  motionType?: 'None' | 'Jet' | 'Orbit' | 'Across' | 'Return' | 'Shift';
+  motionDirection?: 'toward-center' | 'away-from-center';
+  motionEndpoint?: { x: number; y: number };
 }
 
 interface Route {
@@ -83,13 +91,12 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   const [players, setPlayers] = useState<Player[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [draggedPlayer, setDraggedPlayer] = useState<string | null>(null);
+  const [draggedMotionEndpoint, setDraggedMotionEndpoint] = useState<string | null>(null);
   
-  // Drawing custom routes
   const [isDrawingRoute, setIsDrawingRoute] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [currentRoute, setCurrentRoute] = useState<Array<{ x: number; y: number }>>([]);
   
-  // Default collapsed sections
   const [showFormationMetadata, setShowFormationMetadata] = useState(true);
   const [showLinemenSection, setShowLinemenSection] = useState(false);
   const [showBacksSection, setShowBacksSection] = useState(false);
@@ -98,7 +105,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
   const svgRef = useRef<SVGSVGElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   
-  // Validation state
   const [showValidationModal, setShowValidationModal] = useState(false);
   const [validationResult, setValidationResult] = useState<FormationValidation | null>(null);
   const [saveAnywayConfirmed, setSaveAnywayConfirmed] = useState(false);
@@ -130,7 +136,10 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
         assignment: p.assignment,
         blockType: p.blockType,
         blockResponsibility: p.blockResponsibility,
-        isPrimary: p.isPrimary || false
+        isPrimary: p.isPrimary || false,
+        motionType: p.motionType || 'None',
+        motionDirection: p.motionDirection || 'toward-center',
+        motionEndpoint: p.motionEndpoint
       })));
       setRoutes(existingPlay.diagram.routes || []);
     }
@@ -169,11 +178,9 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
   }, [existingPlay, playCode, teamId, supabase]);
 
-  // Reset routes when play type changes
   useEffect(() => {
     if (!existingPlay) {
       setRoutes([]);
-      // Clear all player assignments
       setPlayers(prev => prev.map(p => ({
         ...p,
         assignment: undefined,
@@ -207,7 +214,9 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
         label: pos.label,
         position: pos.position,
         side: odk === 'defense' ? 'defense' : 'offense',
-        isPrimary: false
+        isPrimary: false,
+        motionType: 'None',
+        motionDirection: 'toward-center'
       }));
       
       setPlayers(newPlayers);
@@ -215,10 +224,9 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
   };
 
-  // Auto-generate route path based on route type
   const generateRoutePath = (player: Player, routeType: string): Array<{ x: number; y: number }> => {
-    const startX = player.x;
-    const startY = player.y;
+    const startX = player.motionEndpoint?.x || player.x;
+    const startY = player.motionEndpoint?.y || player.y;
     const lineOfScrimmage = 200;
     const isLeftSide = startX < 350;
 
@@ -315,16 +323,13 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
   };
 
-  // Auto-generate routes when assignment changes (except custom draw)
   useEffect(() => {
     const newRoutes: Route[] = [];
     
     players.forEach(player => {
-      // Generate routes for pass plays OR run plays with pass route assignments (decoy routes)
       if (player.assignment && player.assignment !== 'Block' && player.assignment !== 'Draw Route (Custom)') {
         const routePath = generateRoutePath(player, player.assignment);
         if (routePath.length > 1) {
-          // Preserve existing isPrimary status from current routes
           const existingRoute = routes.find(r => r.playerId === player.id);
           newRoutes.push({
             id: `route-${player.id}`,
@@ -337,7 +342,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       }
     });
     
-    // Keep manually drawn routes with their isPrimary status preserved
     const manualRoutes = routes.filter(r => {
       const player = players.find(p => p.id === r.playerId);
       return player?.assignment === 'Draw Route (Custom)';
@@ -346,27 +350,42 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     setRoutes([...newRoutes, ...manualRoutes]);
   }, [players]);
 
-  const handleMouseDown = (playerId: string) => {
+  const handleMouseDown = (playerId: string, isMotionEndpoint: boolean = false) => {
     if (isDrawingRoute) return;
-    setDraggedPlayer(playerId);
+    if (isMotionEndpoint) {
+      setDraggedMotionEndpoint(playerId);
+    } else {
+      setDraggedPlayer(playerId);
+    }
   };
 
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    if (!svgRef.current || !draggedPlayer) return;
+    if (!svgRef.current) return;
 
     const rect = svgRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 700;
     const y = ((e.clientY - rect.top) / rect.height) * 400;
 
-    setPlayers(prev =>
-      prev.map(p =>
-        p.id === draggedPlayer ? { ...p, x, y } : p
-      )
-    );
-  }, [draggedPlayer]);
+    if (draggedPlayer) {
+      setPlayers(prev =>
+        prev.map(p =>
+          p.id === draggedPlayer ? { ...p, x, y } : p
+        )
+      );
+    } else if (draggedMotionEndpoint) {
+      setPlayers(prev =>
+        prev.map(p =>
+          p.id === draggedMotionEndpoint 
+            ? { ...p, motionEndpoint: { x, y } } 
+            : p
+        )
+      );
+    }
+  }, [draggedPlayer, draggedMotionEndpoint]);
 
   const handleMouseUp = () => {
     setDraggedPlayer(null);
+    setDraggedMotionEndpoint(null);
   };
 
   const handleFieldClick = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -405,9 +424,12 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     const player = players.find(p => p.id === playerId);
     if (!player) return;
 
+    const startX = player.motionEndpoint?.x || player.x;
+    const startY = player.motionEndpoint?.y || player.y;
+
     setSelectedPlayer(playerId);
     setIsDrawingRoute(true);
-    setCurrentRoute([{ x: player.x, y: player.y }]);
+    setCurrentRoute([{ x: startX, y: startY }]);
   };
 
   const cancelCustomRoute = () => {
@@ -442,6 +464,50 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     setPlayers(prev =>
       prev.map(p =>
         p.id === playerId ? { ...p, blockResponsibility } : p
+      )
+    );
+  };
+
+  const updatePlayerMotionType = (playerId: string, motionType: string) => {
+    const player = players.find(p => p.id === playerId);
+    if (!player) return;
+
+    const endpoint = motionType === 'None' 
+      ? undefined 
+      : calculateMotionEndpoint(
+          { x: player.x, y: player.y },
+          motionType,
+          player.motionDirection || 'toward-center'
+        );
+
+    setPlayers(prev =>
+      prev.map(p =>
+        p.id === playerId 
+          ? { 
+              ...p, 
+              motionType: motionType as Player['motionType'],
+              motionEndpoint: endpoint
+            } 
+          : p
+      )
+    );
+  };
+
+  const updatePlayerMotionDirection = (playerId: string, direction: 'toward-center' | 'away-from-center') => {
+    const player = players.find(p => p.id === playerId);
+    if (!player || !player.motionType || player.motionType === 'None') return;
+
+    const endpoint = calculateMotionEndpoint(
+      { x: player.x, y: player.y },
+      player.motionType,
+      direction
+    );
+
+    setPlayers(prev =>
+      prev.map(p =>
+        p.id === playerId 
+          ? { ...p, motionDirection: direction, motionEndpoint: endpoint } 
+          : p
       )
     );
   };
@@ -534,22 +600,53 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     }
   };
 
+  const getDefensivePosition = (responsibility: string): { x: number; y: number } | null => {
+    const lineOfScrimmage = 200;
+    const linemen = players.filter(p => getPositionGroup(p.position) === 'linemen');
+    const center = linemen.find(p => p.position === 'C');
+    const lg = linemen.find(p => p.position === 'LG');
+    const rg = linemen.find(p => p.position === 'RG');
+    const lt = linemen.find(p => p.position === 'LT');
+    const rt = linemen.find(p => p.position === 'RT');
+    
+    const centerX = center?.x || 350;
+    const resp = responsibility.toLowerCase();
+
+    for (const [key, alignment] of Object.entries(DEFENSIVE_ALIGNMENTS)) {
+      const matchTerms = alignment.matchTerms.map(t => t.toLowerCase());
+      const matches = matchTerms.some(term => resp.includes(term));
+      
+      if (matches) {
+        return alignment.getPosition({
+          lineOfScrimmage,
+          centerX,
+          center,
+          lg,
+          rg,
+          lt,
+          rt,
+          responsibility: resp
+        });
+      }
+    }
+
+    return null;
+  };
+
   const getBlockingArrowDirection = (player: Player): { endX: number; endY: number } | null => {
     if (!player.blockType && !player.blockResponsibility) return null;
 
     const baseLength = 35;
-    const centerX = player.x;
-    const centerY = player.y;
+    const centerX = player.motionEndpoint?.x || player.x;
+    const centerY = player.motionEndpoint?.y || player.y;
     
-    // Handle Pull blocks - horizontal movement with longer arrow
     if (player.blockType === 'Pull') {
       let direction = 0;
-      if (player.blockResponsibility?.includes('Left') || player.blockResponsibility?.includes('left')) {
+      if (player.blockResponsibility?.toLowerCase().includes('left')) {
         direction = -1;
-      } else if (player.blockResponsibility?.includes('Right') || player.blockResponsibility?.includes('right')) {
+      } else if (player.blockResponsibility?.toLowerCase().includes('right')) {
         direction = 1;
       } else {
-        // Default pull right if not specified
         direction = 1;
       }
       return {
@@ -558,58 +655,28 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       };
     }
 
-    // Calculate angle based on responsibility (who to block)
-    let angle = -45; // Default angle (straight ahead and slightly left)
-    
     if (player.blockResponsibility) {
-      const resp = player.blockResponsibility.toLowerCase();
-      
-      // Nose tackle - straight ahead
-      if (resp.includes('nose')) {
-        angle = -90;
-      }
-      // 1-tech (inside gap) - slight angle
-      else if (resp.includes('1-tech') || resp.includes('1 tech')) {
-        angle = -75;
-      }
-      // 3-tech (outside shoulder) - wider angle
-      else if (resp.includes('3-tech') || resp.includes('3 tech')) {
-        angle = -60;
-      }
-      // 5-tech (outside) - even wider
-      else if (resp.includes('5-tech') || resp.includes('5 tech')) {
-        angle = -45;
-      }
-      // Edge/EMOL - horizontal or very wide
-      else if (resp.includes('emol') || resp.includes('edge')) {
-        angle = -30;
-      }
-      // Linebacker - more upfield
-      else if (resp.includes('lb') || resp.includes('mike') || resp.includes('will') || resp.includes('sam') || resp.includes('linebacker')) {
-        angle = -75;
-      }
-      // Safety - far upfield
-      else if (resp.includes('safety') || resp.includes('fs') || resp.includes('ss')) {
-        angle = -85;
-      }
-      // Defensive back - far upfield
-      else if (resp.includes('cb') || resp.includes('corner')) {
-        angle = -80;
+      const defenderPos = getDefensivePosition(player.blockResponsibility);
+      if (defenderPos) {
+        const dx = defenderPos.x - centerX;
+        const dy = defenderPos.y - centerY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        const endX = centerX + (dx / distance) * baseLength;
+        const endY = centerY + (dy / distance) * baseLength;
+        
+        return { endX, endY };
       }
     }
+
+    let angle = -45;
     
-    // Adjust angle based on block type
     if (player.blockType) {
       const blockTypeLower = player.blockType.toLowerCase();
-      if (blockTypeLower === 'down') {
-        angle -= 15; // More aggressive downfield
-      } else if (blockTypeLower === 'reach') {
-        angle += 15; // More lateral
-      } else if (blockTypeLower === 'scoop') {
-        angle = -60; // Angled upfield
-      } else if (blockTypeLower === 'combo') {
-        angle = -70; // Mostly upfield with some lateral
-      }
+      if (blockTypeLower === 'down') angle = -60;
+      else if (blockTypeLower === 'reach') angle = -30;
+      else if (blockTypeLower === 'scoop') angle = -60;
+      else if (blockTypeLower === 'combo') angle = -70;
     }
 
     const radians = (angle * Math.PI) / 180;
@@ -623,8 +690,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     if (playType !== 'Run' || !targetHole || player.label !== ballCarrier) return null;
 
     const holePos = getHolePosition(targetHole);
-    const startX = player.x;
-    const startY = player.y;
+    const startX = player.motionEndpoint?.x || player.x;
+    const startY = player.motionEndpoint?.y || player.y;
     const endX = holePos.x;
     const endY = holePos.y;
 
@@ -661,8 +728,11 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     const arrowEnd = getBlockingArrowDirection(player);
     if (!arrowEnd) return null;
 
-    const dx = arrowEnd.endX - player.x;
-    const dy = arrowEnd.endY - player.y;
+    const startX = player.motionEndpoint?.x || player.x;
+    const startY = player.motionEndpoint?.y || player.y;
+
+    const dx = arrowEnd.endX - startX;
+    const dy = arrowEnd.endY - startY;
     const length = Math.sqrt(dx * dx + dy * dy);
     const perpX = -dy / length * 8;
     const perpY = dx / length * 8;
@@ -670,8 +740,8 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     return (
       <g key={`block-${player.id}`}>
         <line
-          x1={player.x}
-          y1={player.y}
+          x1={startX}
+          y1={startY}
           x2={arrowEnd.endX}
           y2={arrowEnd.endY}
           stroke="#888888"
@@ -684,6 +754,55 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
           y2={arrowEnd.endY + perpY}
           stroke="#888888"
           strokeWidth="2"
+        />
+      </g>
+    );
+  };
+
+  const renderMotionArrow = (player: Player) => {
+    if (!player.motionType || player.motionType === 'None' || !player.motionEndpoint) return null;
+
+    const startX = player.x;
+    const startY = player.y;
+    const endX = player.motionEndpoint.x;
+    const endY = player.motionEndpoint.y;
+
+    return (
+      <g key={`motion-${player.id}`}>
+        <defs>
+          <marker
+            id={`motion-arrow-${player.id}`}
+            markerWidth="6"
+            markerHeight="6"
+            refX="5"
+            refY="3"
+            orient="auto"
+          >
+            <path d="M 0 0 L 6 3 L 0 6 z" fill="#888888" />
+          </marker>
+        </defs>
+        <line
+          x1={startX}
+          y1={startY}
+          x2={endX}
+          y2={endY}
+          stroke="#888888"
+          strokeWidth="2"
+          strokeDasharray="5,5"
+          markerEnd={`url(#motion-arrow-${player.id})`}
+        />
+        <circle
+          cx={endX}
+          cy={endY}
+          r="6"
+          fill="#888888"
+          stroke="#ffffff"
+          strokeWidth="2"
+          className="cursor-move"
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            handleMouseDown(player.id, true);
+          }}
         />
       </g>
     );
@@ -747,14 +866,12 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
     
     if (playType === 'Run') {
       if (group === 'linemen') return [];
-      // For backs on run plays: allow Block OR pass routes (as decoys), but only if not the ball carrier
       if (group === 'backs') {
         if (player.label === ballCarrier) {
-          return []; // Ball carrier doesn't get assignment options
+          return [];
         }
         return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
       }
-      // Receivers can block or run decoy routes on run plays
       if (group === 'receivers') return ['Block', ...PASSING_ROUTES, 'Draw Route (Custom)'];
     } else if (playType === 'Pass') {
       if (group === 'linemen') return [];
@@ -780,11 +897,12 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
       const validation = validateOffensiveFormation(players);
       const illegalFormation = checkIllegalFormation(players);
       const offsidesCheck = checkOffsides(players, 'offense');
+      const motionCheck = validateMotion(players);
       
       const combinedValidation: FormationValidation = {
-        isValid: validation.isValid && illegalFormation.isValid && offsidesCheck.isValid,
-        errors: [...validation.errors, ...illegalFormation.errors, ...offsidesCheck.errors],
-        warnings: [...validation.warnings, ...illegalFormation.warnings, ...offsidesCheck.warnings]
+        isValid: validation.isValid && illegalFormation.isValid && offsidesCheck.isValid && motionCheck.isValid,
+        errors: [...validation.errors, ...illegalFormation.errors, ...offsidesCheck.errors, ...motionCheck.errors],
+        warnings: [...validation.warnings, ...illegalFormation.warnings, ...offsidesCheck.warnings, ...motionCheck.warnings]
       };
       
       if (!combinedValidation.isValid || combinedValidation.warnings.length > 0) {
@@ -821,7 +939,10 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
         assignment: p.assignment,
         blockType: p.blockType,
         blockResponsibility: p.blockResponsibility,
-        isPrimary: p.isPrimary
+        isPrimary: p.isPrimary,
+        motionType: p.motionType,
+        motionDirection: p.motionDirection,
+        motionEndpoint: p.motionEndpoint
       })),
       routes: routes.map(r => ({
         id: r.id,
@@ -899,13 +1020,10 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
 
   return (
     <div className="space-y-6">
-      {/* TWO-COLUMN LAYOUT: Forms Left, Diagram Right (Sticky) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* ========== LEFT COLUMN: All Forms ========== */}
         <div className="space-y-6">
           
-          {/* Header */}
           <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -1000,7 +1118,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               )}
             </div>
 
-            {/* Coming Soon Message for Other Play Types */}
             {odk === 'offense' && playType && playType !== 'Run' && playType !== 'Pass' && (
               <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm text-blue-800">
@@ -1009,7 +1126,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               </div>
             )}
 
-            {/* Hole and Ball Carrier for Run Plays */}
             {odk === 'offense' && playType === 'Run' && (
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
@@ -1048,7 +1164,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               </div>
             )}
 
-            {/* Formation Metadata Display */}
             {formation && odk === 'offense' && FORMATION_METADATA[formation] && (
               <div className="mb-4 border border-blue-200 rounded-lg overflow-hidden">
                 <button
@@ -1114,7 +1229,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               </div>
             )}
 
-            {/* Defense Attributes */}
             {odk === 'defense' && (
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
@@ -1166,12 +1280,10 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
             )}
           </div>
 
-          {/* Position Assignments Section - Only show for Run and Pass */}
           {odk === 'offense' && (playType === 'Run' || playType === 'Pass') && players.length > 0 && (
             <div className="space-y-3">
               <h3 className="text-lg font-bold text-gray-900 border-b pb-2">Player Assignments</h3>
               
-              {/* Offensive Linemen */}
               {linemen.length > 0 && (
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
                   <button
@@ -1232,7 +1344,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </div>
               )}
 
-              {/* QB & Backs */}
               {backs.length > 0 && (
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
                   <button
@@ -1254,29 +1365,102 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {backs.map(player => {
                           const isBallCarrier = playType === 'Run' && player.label === ballCarrier;
+                          const group = getPositionGroup(player.position);
+                          const canHaveMotion = group !== 'linemen';
+                          const hasMotion = player.motionType && player.motionType !== 'None';
+                          
                           return (
                             <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
-                              <label className="block text-sm font-bold text-gray-900 mb-2">
+                              <label className="block text-sm font-bold text-gray-900 mb-3">
                                 {player.label}
                                 {isBallCarrier && <span className="ml-2 text-xs text-red-600">(Ball Carrier)</span>}
                               </label>
                               
                               {!isBallCarrier && (
                                 <>
-                                  <select
-                                    value={player.assignment || ''}
-                                    onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
-                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-2"
-                                  >
-                                    <option value="">Select...</option>
-                                    {getAssignmentOptionsForPlayer(player).map(opt => (
-                                      <option key={opt} value={opt}>{opt}</option>
-                                    ))}
-                                  </select>
+                                  {canHaveMotion && (
+                                    <div className="mb-3 p-3 bg-gray-50 rounded border border-gray-200">
+                                      <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center">
+                                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                                        </svg>
+                                        Pre-Snap Motion
+                                      </h5>
+                                      
+                                      <div className="mb-2">
+                                        <label className="block text-xs text-gray-600 mb-1">Motion Type</label>
+                                        <select
+                                          value={player.motionType || 'None'}
+                                          onChange={(e) => updatePlayerMotionType(player.id, e.target.value)}
+                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                        >
+                                          <option value="None">None</option>
+                                          <option value="Jet">Jet - Fast lateral to center</option>
+                                          <option value="Orbit">Orbit - Loop behind QB</option>
+                                          <option value="Across">Across - Short lateral move</option>
+                                          <option value="Return">Return - Fake & return to set</option>
+                                          <option value="Shift">Shift - Static realignment</option>
+                                        </select>
+                                      </div>
+                                      
+                                      {hasMotion && (
+                                        <>
+                                          <div className="mb-2">
+                                            <label className="block text-xs text-gray-600 mb-1">Direction</label>
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => updatePlayerMotionDirection(player.id, 'toward-center')}
+                                                className={`px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                                                  player.motionDirection === 'toward-center'
+                                                    ? 'bg-blue-600 text-white shadow-sm'
+                                                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                              >
+                                                → Center
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => updatePlayerMotionDirection(player.id, 'away-from-center')}
+                                                className={`px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                                                  player.motionDirection === 'away-from-center'
+                                                    ? 'bg-blue-600 text-white shadow-sm'
+                                                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                              >
+                                                ← Away
+                                              </button>
+                                            </div>
+                                          </div>
+                                          
+                                          {MOTION_TYPES[player.motionType.toUpperCase()] && (
+                                            <div className="text-xs text-blue-700 italic p-2 bg-blue-50 rounded border border-blue-200">
+                                              ℹ️ {MOTION_TYPES[player.motionType.toUpperCase()].description}
+                                            </div>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
                                   
-                                  {/* Blocking dropdowns for backs when Block is selected */}
+                                  <div>
+                                    <label className="block text-xs text-gray-600 mb-1 font-semibold">
+                                      {hasMotion ? 'Post-Snap Action (from motion endpoint)' : 'Assignment'}
+                                    </label>
+                                    <select
+                                      value={player.assignment || ''}
+                                      onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-2"
+                                    >
+                                      <option value="">Select post-snap action...</option>
+                                      {getAssignmentOptionsForPlayer(player).map(opt => (
+                                        <option key={opt} value={opt}>{opt}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  
                                   {player.assignment === 'Block' && (
-                                    <div className="space-y-2 mt-2">
+                                    <div className="space-y-2 mt-2 p-2 bg-gray-50 rounded border border-gray-200">
                                       <div>
                                         <label className="block text-xs text-gray-600 mb-1">Block Type</label>
                                         <select
@@ -1314,14 +1498,21 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                                         onChange={() => togglePrimaryReceiver(player.id)}
                                         className="w-3 h-3 mr-1"
                                       />
-                                      Primary (red route)
+                                      Primary receiver (red route)
                                     </label>
                                   )}
                                 </>
                               )}
                               
                               {isBallCarrier && (
-                                <p className="text-xs text-gray-600 italic">Carrying the ball to hole {targetHole}</p>
+                                <div className="text-xs text-gray-600 p-2 bg-red-50 rounded border border-red-200">
+                                  🏈 Carrying the ball to hole {targetHole}
+                                  {player.motionType && player.motionType !== 'None' && (
+                                    <div className="mt-1 text-red-700 font-medium">
+                                      Motion: {player.motionType} → then carries ball
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </div>
                           );
@@ -1332,7 +1523,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </div>
               )}
 
-              {/* Receivers */}
               {receivers.length > 0 && (
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
                   <button
@@ -1352,67 +1542,143 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                   {showReceiversSection && (
                     <div className="p-4 bg-green-50">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {receivers.map(player => (
-                          <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
-                            <label className="block text-sm font-bold text-gray-900 mb-2">
-                              {player.label}
-                            </label>
-                            <select
-                              value={player.assignment || ''}
-                              onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-2"
-                            >
-                              <option value="">Select...</option>
-                              {getAssignmentOptionsForPlayer(player).map(opt => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
-                            
-                            {/* Blocking dropdowns for receivers when Block is selected */}
-                            {player.assignment === 'Block' && (
-                              <div className="space-y-2 mt-2">
-                                <div>
-                                  <label className="block text-xs text-gray-600 mb-1">Block Type</label>
-                                  <select
-                                    value={player.blockType || ''}
-                                    onChange={(e) => updatePlayerBlockType(player.id, e.target.value)}
-                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
-                                  >
-                                    <option value="">Select...</option>
-                                    {BLOCKING_ASSIGNMENTS.map(opt => (
-                                      <option key={opt} value={opt}>{opt}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
-                                  <select
-                                    value={player.blockResponsibility || ''}
-                                    onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
-                                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
-                                  >
-                                    <option value="">Select...</option>
-                                    {BLOCK_RESPONSIBILITIES.map(opt => (
-                                      <option key={opt} value={opt}>{opt}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </div>
-                            )}
-                            
-                            {player.assignment && player.assignment !== 'Block' && (
-                              <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800 mt-2">
-                                <input
-                                  type="checkbox"
-                                  checked={player.isPrimary || false}
-                                  onChange={() => togglePrimaryReceiver(player.id)}
-                                  className="w-3 h-3 mr-1"
-                                />
-                                Primary (red route)
+                        {receivers.map(player => {
+                          const group = getPositionGroup(player.position);
+                          const canHaveMotion = group !== 'linemen';
+                          const hasMotion = player.motionType && player.motionType !== 'None';
+                          
+                          return (
+                            <div key={player.id} className="bg-white p-3 rounded border border-gray-200">
+                              <label className="block text-sm font-bold text-gray-900 mb-3">
+                                {player.label}
                               </label>
-                            )}
-                          </div>
-                        ))}
+                              
+                              {canHaveMotion && (
+                                <div className="mb-3 p-3 bg-gray-50 rounded border border-gray-200">
+                                  <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center">
+                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                                    </svg>
+                                    Pre-Snap Motion
+                                  </h5>
+                                  
+                                  <div className="mb-2">
+                                    <label className="block text-xs text-gray-600 mb-1">Motion Type</label>
+                                    <select
+                                      value={player.motionType || 'None'}
+                                      onChange={(e) => updatePlayerMotionType(player.id, e.target.value)}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                    >
+                                      <option value="None">None</option>
+                                      <option value="Jet">Jet - Fast lateral to center</option>
+                                      <option value="Orbit">Orbit - Loop behind QB</option>
+                                      <option value="Across">Across - Short lateral move</option>
+                                      <option value="Return">Return - Fake & return to set</option>
+                                      <option value="Shift">Shift - Static realignment</option>
+                                    </select>
+                                  </div>
+                                  
+                                  {hasMotion && (
+                                    <>
+                                      <div className="mb-2">
+                                        <label className="block text-xs text-gray-600 mb-1">Direction</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => updatePlayerMotionDirection(player.id, 'toward-center')}
+                                            className={`px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                                              player.motionDirection === 'toward-center'
+                                                ? 'bg-blue-600 text-white shadow-sm'
+                                                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                            }`}
+                                          >
+                                            → Center
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => updatePlayerMotionDirection(player.id, 'away-from-center')}
+                                            className={`px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                                              player.motionDirection === 'away-from-center'
+                                                ? 'bg-blue-600 text-white shadow-sm'
+                                                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                            }`}
+                                          >
+                                            ← Away
+                                          </button>
+                                        </div>
+                                      </div>
+                                      
+                                      {MOTION_TYPES[player.motionType.toUpperCase()] && (
+                                        <div className="text-xs text-blue-700 italic p-2 bg-blue-50 rounded border border-blue-200">
+                                          ℹ️ {MOTION_TYPES[player.motionType.toUpperCase()].description}
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                              
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1 font-semibold">
+                                  {hasMotion ? 'Post-Snap Action (from motion endpoint)' : 'Assignment'}
+                                </label>
+                                <select
+                                  value={player.assignment || ''}
+                                  onChange={(e) => updatePlayerAssignment(player.id, e.target.value)}
+                                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 mb-2"
+                                >
+                                  <option value="">Select...</option>
+                                  {getAssignmentOptionsForPlayer(player).map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              
+                              {player.assignment === 'Block' && (
+                                <div className="space-y-2 mt-2 p-2 bg-gray-50 rounded border border-gray-200">
+                                  <div>
+                                    <label className="block text-xs text-gray-600 mb-1">Block Type</label>
+                                    <select
+                                      value={player.blockType || ''}
+                                      onChange={(e) => updatePlayerBlockType(player.id, e.target.value)}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                    >
+                                      <option value="">Select...</option>
+                                      {BLOCKING_ASSIGNMENTS.map(opt => (
+                                        <option key={opt} value={opt}>{opt}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-gray-600 mb-1">Responsibility</label>
+                                    <select
+                                      value={player.blockResponsibility || ''}
+                                      onChange={(e) => updatePlayerBlockResponsibility(player.id, e.target.value)}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900"
+                                    >
+                                      <option value="">Select...</option>
+                                      {BLOCK_RESPONSIBILITIES.map(opt => (
+                                        <option key={opt} value={opt}>{opt}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {player.assignment && player.assignment !== 'Block' && (
+                                <label className="flex items-center text-xs text-gray-600 cursor-pointer hover:text-gray-800 mt-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={player.isPrimary || false}
+                                    onChange={() => togglePrimaryReceiver(player.id)}
+                                    className="w-3 h-3 mr-1"
+                                  />
+                                  Primary receiver (red route)
+                                </label>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1421,7 +1687,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
             </div>
           )}
 
-          {/* Save Button - Bottom of Left Column */}
           <div className="flex justify-end">
             <button
               onClick={savePlay}
@@ -1433,14 +1698,11 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
           </div>
 
         </div>
-        {/* ========== END LEFT COLUMN ========== */}
 
-        {/* ========== RIGHT COLUMN: Sticky Diagram ========== */}
         <div className="lg:sticky lg:top-6 lg:h-fit">
           <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
             <h3 className="text-lg font-bold text-gray-900 mb-4">Play Diagram</h3>
             
-            {/* Instructions OUTSIDE the SVG */}
             <div className="mb-4 p-3 bg-gray-50 rounded-md text-xs leading-relaxed">
               <p className="text-gray-700">
                 <strong>Drag players</strong> to reposition. <strong>Select assignments</strong> from dropdowns - routes auto-generate! 
@@ -1463,7 +1725,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
               >
                 <rect width="700" height="400" fill="#2a6e3f" />
                 
-                {/* Field markings */}
                 {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
                   <line
                     key={i}
@@ -1477,19 +1738,16 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                   />
                 ))}
 
-                {/* Hash marks */}
                 <line x1="250" y1="0" x2="250" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
                 <line x1="450" y1="0" x2="450" y2="400" stroke="white" strokeWidth="1" strokeDasharray="5,5" opacity="0.5" />
                 
-                {/* Line of scrimmage */}
                 <line x1="0" y1="200" x2="700" y2="200" stroke="white" strokeWidth="3" />
 
-                {/* Draw arrows FIRST */}
                 {players.map(player => renderBallCarrierArrow(player))}
                 {players.map(player => renderBlockingArrow(player))}
+                {players.map(player => renderMotionArrow(player))}
                 {routes.map(route => renderPassRoute(route))}
 
-                {/* Current route being drawn */}
                 {currentRoute.length > 1 && (
                   <g>
                     <path
@@ -1517,7 +1775,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                   </g>
                 )}
 
-                {/* Draw players ON TOP */}
                 {players.map(player => (
                   <g key={player.id}>
                     {player.side === 'defense' ? (
@@ -1567,12 +1824,9 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
             </div>
           </div>
         </div>
-        {/* ========== END RIGHT COLUMN ========== */}
 
       </div>
-      {/* END TWO-COLUMN GRID */}
 
-      {/* Validation Modal */}
       {showValidationModal && validationResult && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
@@ -1591,7 +1845,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </button>
               </div>
 
-              {/* Summary */}
               <div className={`mb-4 p-4 rounded-lg ${
                 validationResult.isValid 
                   ? 'bg-yellow-50 border border-yellow-200' 
@@ -1602,7 +1855,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </p>
               </div>
 
-              {/* Errors */}
               {validationResult.errors.length > 0 && (
                 <div className="mb-4">
                   <h4 className="font-semibold text-red-700 mb-2 flex items-center">
@@ -1621,7 +1873,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </div>
               )}
 
-              {/* Warnings */}
               {validationResult.warnings.length > 0 && (
                 <div className="mb-4">
                   <h4 className="font-semibold text-yellow-700 mb-2 flex items-center">
@@ -1640,7 +1891,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </div>
               )}
 
-              {/* Educational Note */}
               <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm text-blue-800">
                   <strong>💡 Coach's Note:</strong> These validations ensure your plays follow official football rules. 
@@ -1650,7 +1900,6 @@ export default function PlayBuilder({ teamId, teamName, existingPlay, onSave }: 
                 </p>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex justify-end gap-3">
                 <button
                   onClick={() => setShowValidationModal(false)}
